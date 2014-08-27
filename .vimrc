@@ -58,12 +58,13 @@ nnoremap s+ <C-w>+
 nnoremap s- <C-w>-
 
 NeoBundle 'croaker/mustang-vim'
-NeoBundle 'Shougo/unitrvim'
 NeoBundle 'Shougo/neomru.vim'
 NeoBundle 'scrooloose/nerdtree'
 NeoBundle 'tomtom/tcomment_vim'
 NeoBundle 'mattn/emmet-vim'
 NeoBundle 'croaker/mustang-vim'
+NeoBundle 'scrooloose/syntastic'
+NeoBundle 'fatih/vim-go'
 
 colorscheme mustang
 
