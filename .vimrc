@@ -65,6 +65,8 @@ NeoBundle 'mattn/emmet-vim'
 NeoBundle 'croaker/mustang-vim'
 NeoBundle 'scrooloose/syntastic'
 NeoBundle 'fatih/vim-go'
+NeoBundle 'guns/vim-clojure-static'
+NeoBundle 'tpope/vim-fireplace'
 
 colorscheme mustang
 
