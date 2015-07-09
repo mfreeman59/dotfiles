@@ -16,16 +16,6 @@ set autoindent
 set smartindent
 set number
 
-inoremap { {}<Left>
-inoremap [ []<Left>
-inoremap ( ()<Left>
-inoremap " ""<Left>
-inoremap ' ''<Left>
-inoremap < <><Left>
-inoremap {<Enter> {}<Left><CR><ESC><S-o>
-inoremap [<Enter> []<Left><CR><ESC><S-o>
-inoremap (<Enter> ()<Left><CR><ESC><S-o>
-
 nnoremap s <Nop>
 nnoremap sj <C-w>j
 nnoremap sk <C-w>k
