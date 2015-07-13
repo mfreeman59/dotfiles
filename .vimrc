@@ -3,10 +3,28 @@ filetype off
 
 if has('vim_starting')
   set runtimepath+=~/.vim/bundle/neobundle.vim
-  call neobundle#rc(expand('~/.vim/bundle'))
+  call neobundle#begin(expand('~/.vim/bundle'))
+  
+  NeoBundleFetch 'Shougo/neobundle.vim'
+  NeoBundle 'croaker/mustang-vim'
+  NeoBundle 'Shougo/neomru.vim'
+  NeoBundle 'scrooloose/nerdtree'
+  NeoBundle 'tomtom/tcomment_vim'
+  NeoBundle 'mattn/emmet-vim'
+  NeoBundle 'croaker/mustang-vim'
+  NeoBundle 'scrooloose/syntastic'
+  NeoBundle 'fatih/vim-go'
+  NeoBundle 'guns/vim-clojure-static'
+  NeoBundle 'tpope/vim-fireplace'
+  NeoBundle 'marijnh/tern_for_vim', {
+    \ 'build': {
+    \   'others': 'npm install'
+    \}}
+  NeoBundle 'Townk/vim-autoclose'
+
+  call neobundle#end()
 endif 
 
-NeoBundleFetch 'Shougo/neobundle.vim'
 
 set expandtab
 set tabstop=2
@@ -47,21 +65,6 @@ nnoremap s< <C-w><
 nnoremap s+ <C-w>+
 nnoremap s- <C-w>-
 
-NeoBundle 'croaker/mustang-vim'
-NeoBundle 'Shougo/neomru.vim'
-NeoBundle 'scrooloose/nerdtree'
-NeoBundle 'tomtom/tcomment_vim'
-NeoBundle 'mattn/emmet-vim'
-NeoBundle 'croaker/mustang-vim'
-NeoBundle 'scrooloose/syntastic'
-NeoBundle 'fatih/vim-go'
-NeoBundle 'guns/vim-clojure-static'
-NeoBundle 'tpope/vim-fireplace'
-NeoBundle 'marijnh/tern_for_vim', {
-  \ 'build': {
-  \   'others': 'npm install'
-  \}}
-NeoBundle 'Townk/vim-autoclose'
 
 let g:syntastic_check_on_open=0
 let g:syntastic_check_on_save=1
