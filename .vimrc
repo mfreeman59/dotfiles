@@ -1,31 +1,6 @@
 set nocompatible
 filetype off
 
-if has('vim_starting')
-  set runtimepath+=~/.vim/bundle/neobundle.vim
-  call neobundle#begin(expand('~/.vim/bundle'))
-  
-  NeoBundleFetch 'Shougo/neobundle.vim'
-  NeoBundle 'croaker/mustang-vim'
-  NeoBundle 'Shougo/neomru.vim'
-  NeoBundle 'scrooloose/nerdtree'
-  NeoBundle 'tomtom/tcomment_vim'
-  NeoBundle 'mattn/emmet-vim'
-  NeoBundle 'croaker/mustang-vim'
-  NeoBundle 'scrooloose/syntastic'
-  NeoBundle 'fatih/vim-go'
-  NeoBundle 'guns/vim-clojure-static'
-  NeoBundle 'tpope/vim-fireplace'
-  NeoBundle 'marijnh/tern_for_vim', {
-    \ 'build': {
-    \   'others': 'npm install'
-    \}}
-  NeoBundle 'Townk/vim-autoclose'
-
-  call neobundle#end()
-endif 
-
-
 set expandtab
 set tabstop=2
 set shiftwidth=2
@@ -82,8 +57,6 @@ let g:syntastic_mode_map = {
 let g:syntastic_enable_signs=1
 let g:syntastic_error_symbol='✗'
 let g:syntastic_warning_symbol='⚠'
-
-colorscheme mustang
 
 filetype plugin on
 filetype indent on
