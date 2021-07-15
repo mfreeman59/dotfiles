@@ -109,3 +109,6 @@ fi
 
 # gitの補完
 source ~/dotfiles/.git-completion.bash
+
+# Dockerクリーン
+alias dockerclean='docker image prune && docker volume rm `docker volume ls -q -f dangling=true`'
