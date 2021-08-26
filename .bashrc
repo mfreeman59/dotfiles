@@ -114,4 +114,4 @@ source ~/dotfiles/.git-completion.bash
 alias dockerclean='docker image prune && docker volume rm `docker volume ls -q -f dangling=true`'
 
 # localhostでhttpsが使えるようにする
-NODE_TLS_REJECT_UNAUTHORIZED=0
+export NODE_TLS_REJECT_UNAUTHORIZED=0
