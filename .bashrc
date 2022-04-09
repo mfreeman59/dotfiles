@@ -111,7 +111,7 @@ fi
 source ~/dotfiles/.git-completion.bash
 
 # Dockerクリーン
-alias dockerclean='docker image prune && docker volume rm `docker volume ls -q -f dangling=true`'
+alias dockerclean='docker-compose down --rmi all --volumes --remove-orphans'
 
 # localhostでhttpsが使えるようにする
 export NODE_TLS_REJECT_UNAUTHORIZED=0
