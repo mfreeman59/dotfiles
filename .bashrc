@@ -112,6 +112,3 @@ source ~/dotfiles/.git-completion.bash
 
 # Dockerクリーン
 alias dockerclean='docker-compose down --rmi all --volumes --remove-orphans'
-
-# localhostでhttpsが使えるようにする
-export NODE_TLS_REJECT_UNAUTHORIZED=0
