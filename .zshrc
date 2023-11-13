@@ -4,4 +4,4 @@ alias la='ls -A'
 alias l='ls -CF'
 
 # gitの補完
-source ~/dotfiles/.git-completion.zsh
+source ~/dotfiles/.git-completion.bash
