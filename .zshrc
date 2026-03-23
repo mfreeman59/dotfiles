@@ -10,7 +10,9 @@ alias ccd='claude --dangerously-skip-permissions'
 alias ccr='claude --resume'
 
 # gitの補完
-source ~/dotfiles/.git-completion.bash
+zstyle ':completion:*:*:git:*' script ~/dotfiles/.git-completion.bash
+fpath=(~/dotfiles $fpath)
+autoload -Uz compinit && compinit
 
 # .zprofileの読み込み
 source ~/.zprofile
