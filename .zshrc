@@ -15,8 +15,8 @@ fpath=(~/dotfiles $fpath)
 autoload -Uz compinit && compinit
 
 # .zprofileの読み込み
-# ログインシェルでは zsh が既に .zprofile を読込済みなので、非ログイン
-# シェル（自動読込されない）の時だけ読み込んで二重ロードを避ける
-if [[ ! -o login && -f ~/.zprofile ]]; then
-  source ~/.zprofile
-fi
+# ログインシェルでは zsh が .zprofile → /etc/zshrc → ~/.zshrc の順で
+# 読み込まれ、/etc/zshrc が PS1 をデフォルト値にリセットしてしまう
+# （starship 等 .zprofile 側の PROMPT 設定が消える）。そのため
+# ログインシェルでも .zshrc の最後で再度 .zprofile を読み込み直す
+[ -f ~/.zprofile ] && source ~/.zprofile
