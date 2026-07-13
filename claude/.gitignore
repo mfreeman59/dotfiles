@@ -1,0 +1,2 @@
+# Ephemeral find<->add correlation window; never meant to be committed.
+data/.pending-find.json

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# note-route <owner/repo@skill> <keyword> [<keyword> ...]
+#
+# Optional helper the skillsh-router SKILL.md tells Claude it may call after
+# resolving a genuinely new capability, to seed/extend a candidate's keyword
+# list ahead of its next hit_count update. This never touches hit_count or
+# promotion directly -- it only unions keywords into an existing or
+# newly-created candidate entry, via the same routes_record_hit path the
+# PostToolUse hook uses (so a candidate seeded here still needs real
+# `skills add` hits to actually promote to a route).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/routes.sh
+source "${SCRIPT_DIR}/../lib/routes.sh"
+
+if [ "$#" -lt 2 ]; then
+  echo "usage: note-route <owner/repo@skill> <keyword> [<keyword> ...]" >&2
+  exit 1
+fi
+
+pkgspec="$1"
+shift
+
+if [[ "$pkgspec" == *"@"* ]]; then
+  skill_name="${pkgspec##*@}"
+else
+  skill_name="$pkgspec"
+fi
+install_path="${HOME}/.claude/skills/${skill_name}"
+
+# Normalize the same way routes_normalize_keywords does (lowercase, alnum
+# only) so these keywords are comparable to the ones extracted from prompts.
+keywords_json="$(printf '%s\n' "$@" | jq -R -c '
+  [., inputs]
+  | map(ascii_downcase | gsub("[^a-z0-9]"; ""))
+  | map(select(length > 0))
+  | unique
+')"
+
+routes_init
+updated="$(jq -c \
+  --arg pkg "$pkgspec" \
+  --arg name "$skill_name" \
+  --arg path "$install_path" \
+  --argjson kw "$keywords_json" \
+  '
+  .candidates[$pkg] //= {"package": $pkg, "skill_name": $name, "install_path": $path, "keywords": [], "hit_count": 0, "last_seen": null}
+  | .candidates[$pkg].keywords = ((.candidates[$pkg].keywords + $kw) | unique)
+  ' "$ROUTES_FILE")"
+routes_atomic_write "$updated" "$ROUTES_FILE"
+
+echo "noted keywords for ${pkgspec}: $(printf '%s' "$keywords_json" | jq -r 'join(", ")')"

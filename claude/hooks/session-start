@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# SessionStart hook (matcher: startup|clear|compact).
+#
+# Injects the skillsh-router operating rules plus the current list of
+# promoted routes (pattern -> already-installed skill) as additionalContext,
+# so the model knows to check learned routes before letting find-skills
+# rediscover something it has already resolved 3+ times before.
+#
+# Output schema confirmed against the superpowers plugin's own SessionStart
+# hook (claude-plugins-official/superpowers/hooks/session-start), which uses
+# this exact same shape in production.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/routes.sh
+source "${SCRIPT_DIR}/../lib/routes.sh"
+
+routes_init
+promoted="$(routes_get_promoted)"
+route_count="$(printf '%s' "$promoted" | jq 'length' 2>/dev/null || echo 0)"
+
+if [ "${route_count:-0}" -gt 0 ] 2>/dev/null; then
+  route_lines="$(printf '%s' "$promoted" | jq -r '
+    .[] | "- " + .skill_name + " (keywords: " + (.keywords | join(", ")) + ") - installed at " + .install_path + " (package: " + .package + ")"
+  ' 2>/dev/null)"
+else
+  route_lines="(まだ学習済みルートはありません)"
+fi
+
+rules='あなたには skillsh-router (skills.sh 学習型スキルルーティング層) が有効です。
+
+運用ルール:
+1. 能力ギャップに気づいたら、まず下記「学習済みルート」を確認せよ。ユーザーの意図が明確に一致すれば、find-skills を経由せずそのスキルを Skill ツールで直接起動せよ。
+2. 一致するルートが無ければ、find-skills スキルに解決を委ねよ（`npx skills find <query>` で探索し、品質フィルタを通して `npx skills add <owner/repo@skill> -g -y` で導入）。find-skills をユーザーに代わって手動で名指し起動する必要はない。能力ギャップの文脈で自然に発火させよ。
+3. パターンの記憶・カウント・昇格（3回で学習ルート化）は全てフックが自動で行う。routes.json や pending ファイルを手で編集しないこと。
+4. 学習済みルートはあくまで提案であり強制ではない。ユーザーの実際の意図と食い違う場合はルートを無視して通常通り判断せよ。
+
+学習済みルート:'
+
+context="${rules}
+${route_lines}"
+
+escaped="$(printf '%s' "$context" | jq -Rs '.' 2>/dev/null)"
+
+if [ -z "$escaped" ]; then
+  # jq failed for some reason (shouldn't happen) -- fail open, inject nothing
+  # rather than emit malformed JSON that could break session start.
+  exit 0
+fi
+
+printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": %s\n  }\n}\n' "$escaped"
+
+exit 0

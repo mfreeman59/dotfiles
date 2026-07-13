@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# PostToolUse hook (matcher: Bash).
+#
+# Input field confirmed verbatim against code.claude.com/docs/en/hooks-guide.md's
+# own "log every Bash command" example: `jq -r '.tool_input.command'`.
+#
+# Detects `skills find <query>` and `skills add <pkg>` inside the executed
+# command and updates the routes.json learning ledger. Everything else is an
+# immediate no-op (checked first, before sourcing jq-heavy logic, so this
+# stays cheap on the vast majority of Bash calls that have nothing to do with
+# skills.sh).
+#
+# PostToolUse only fires after a tool call completes (Claude Code has a
+# separate PostToolUseFailure event for failures) -- but "the Bash tool call
+# completed" is not the same as "skills add actually installed the skill"
+# (network error, package not found, etc. all still let the bash command
+# exit and PostToolUse fire). Rather than trust an undocumented tool_response
+# shape, this hook uses the filesystem as ground truth: it only records a hit
+# once the target skill directory actually exists under ~/.claude/skills/.
+#
+# Never blocks or comments on the tool call -- this hook has no stdout output
+# at all, it only ever writes to data/routes.json.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/routes.sh
+source "${SCRIPT_DIR}/../lib/routes.sh"
+
+input="$(cat)"
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)"
+
+# Fast no-op path: the overwhelming majority of Bash calls aren't skills CLI
+# invocations at all.
+case "$cmd" in
+  *"skills find"*) ;;
+  *"skills add"*) ;;
+  *) exit 0 ;;
+esac
+
+case "$cmd" in
+  *"skills add"*)
+    IFS='|' read -r pkgspec skill_val is_global <<<"$(routes_parse_add_command "$cmd")"
+    [ -z "$pkgspec" ] && exit 0
+
+    # Only global installs are tracked: routes must resolve regardless of
+    # which directory the user happens to be in when they ask again.
+    [ "$is_global" != "1" ] && exit 0
+
+    if [[ "$pkgspec" == *"@"* ]]; then
+      skill_name="${pkgspec##*@}"
+    else
+      skill_name="$skill_val"
+    fi
+    [ -z "$skill_name" ] && exit 0
+
+    install_path="${HOME}/.claude/skills/${skill_name}"
+
+    # Ground truth: only count it if the skill actually landed on disk.
+    [ ! -d "$install_path" ] && exit 0
+
+    keywords="$(routes_pending_collect)"
+    routes_record_hit "$pkgspec" "$skill_name" "$install_path" "$keywords"
+    ;;
+  *"skills find"*)
+    query="$(routes_extract_find_query "$cmd")"
+    [ -z "$query" ] && exit 0
+    keywords="$(routes_normalize_keywords "$query")"
+    [ "$keywords" != "[]" ] && routes_pending_stash "$keywords"
+    ;;
+esac
+
+exit 0

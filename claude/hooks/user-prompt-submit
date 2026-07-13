@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook (no matcher support -- fires on every prompt).
+#
+# Reads the just-submitted prompt (.prompt, confirmed field name per
+# code.claude.com/docs/en/hooks-guide.md: "UserPromptSubmit hooks get the
+# `prompt` text"), scores it against promoted routes' keywords, and -- only
+# on a confident single best match -- prints a plain-text suggestion to
+# stdout. Per the same docs: "For UserPromptSubmit ... hooks, anything you
+# write to stdout is added to Claude's context" on exit 0, so no JSON
+# envelope is needed or used here.
+#
+# Silent (no stdout) on: no promoted routes yet, no keyword overlap, or an
+# ambiguous tie -- the whole point is to be a confident shortcut, not a
+# noisy maybe. UserPromptSubmit hooks get a 30s timeout, so this stays
+# jq-only and fast.
+#
+# Keyword extraction (routes_normalize_keywords) strips non-ASCII text, so a
+# Japanese prompt like "このPDFから..." normalizes to just ["pdf"] -- the
+# kana around it act as natural separators, isolating the embedded technical
+# term. That means a Japanese prompt referencing a route by its subject
+# realistically produces only ONE matching keyword, which a flat
+# "overlap >= 2" bar would always reject. To still catch that common case
+# without opening the door to generic single-word false positives, a route
+# also qualifies on a single-keyword match IF that keyword is literally part
+# of the route's own skill_name (e.g. "pdf" in "pdf-tools") -- a
+# name-identifying match is a much stronger signal than an arbitrary shared
+# keyword.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=../lib/routes.sh
+source "${SCRIPT_DIR}/../lib/routes.sh"
+
+input="$(cat)"
+prompt="$(printf '%s' "$input" | jq -r '.prompt // empty' 2>/dev/null)"
+[ -z "$prompt" ] && exit 0
+
+routes_init
+promoted="$(routes_get_promoted)"
+[ "$(printf '%s' "$promoted" | jq 'length' 2>/dev/null || echo 0)" = "0" ] && exit 0
+
+prompt_keywords="$(routes_normalize_keywords "$prompt")"
+[ "$prompt_keywords" = "[]" ] && exit 0
+
+# Score every route by keyword overlap plus a name-identity bonus, best first.
+# combined = name_hit*1000 + overlap, so any name-identifying match always
+# outranks a purely coincidental keyword overlap, while ties within the same
+# tier (e.g. two similarly-named routes both name-hit) still fall through to
+# the ambiguity check below.
+scored="$(printf '%s' "$promoted" | jq -c --argjson pk "$prompt_keywords" '
+  map(
+    (.skill_name | ascii_downcase | [match("[a-z0-9]+"; "g") | .string]) as $name_parts
+    | (($name_parts + [(.skill_name | ascii_downcase)]) | unique) as $name_candidates
+    | . + {
+        overlap: ([.keywords[] as $k | select($pk | index($k) != null)] | length),
+        name_hit: (if (any($name_candidates[]; . as $c | ($pk | index($c)) != null)) then 1 else 0 end)
+      }
+    | . + {combined: (.name_hit * 1000 + .overlap)}
+  )
+  | sort_by(-.combined)
+' 2>/dev/null)"
+[ -z "$scored" ] && exit 0
+
+top_combined="$(printf '%s' "$scored" | jq '.[0].combined // 0' 2>/dev/null || echo 0)"
+second_combined="$(printf '%s' "$scored" | jq '.[1].combined // 0' 2>/dev/null || echo 0)"
+top_name_hit="$(printf '%s' "$scored" | jq '.[0].name_hit // 0' 2>/dev/null || echo 0)"
+top_overlap="$(printf '%s' "$scored" | jq '.[0].overlap // 0' 2>/dev/null || echo 0)"
+
+# Qualify on EITHER a name-identifying match, or >=2 overlapping keywords --
+# and either way, require a clear lead over the runner-up so an ambiguous
+# tie never fires (false positives are worse than a missed shortcut --
+# find-skills is always there as the fallback).
+qualifies=0
+if [ "${top_name_hit:-0}" = "1" ] || { [ "${top_overlap:-0}" -ge 2 ] 2>/dev/null; }; then
+  [ "${top_combined:-0}" -gt "${second_combined:-0}" ] 2>/dev/null && qualifies=1
+fi
+
+if [ "$qualifies" = "1" ]; then
+  route="$(printf '%s' "$scored" | jq -c '.[0]')"
+  skill_name="$(printf '%s' "$route" | jq -r '.skill_name')"
+  install_path="$(printf '%s' "$route" | jq -r '.install_path')"
+  keywords="$(printf '%s' "$route" | jq -r '.keywords | join(", ")')"
+
+  cat <<MSG
+🔁 skillsh-router 学習ルート: このリクエストは「${keywords}」に関連すると思われます。スキル『${skill_name}』は既に導入済みです（${install_path}）。find-skills や \`npx skills find\` を経由せず、Skill ツールでこのスキルを直接起動することを検討してください。ただし実際の意図と合わなければこの提案は無視して構いません。
+MSG
+fi
+
+exit 0
