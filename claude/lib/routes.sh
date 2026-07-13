@@ -52,9 +52,16 @@ routes_atomic_write() {
 # and skills-CLI boilerplate words removed, deduped. Never fails: prints "[]"
 # on any error (e.g. jq missing) so callers can treat the return as a value,
 # not something that needs its own error handling.
+#
+# Uses `-Rs` (slurp), not `-R`: prompts routinely span multiple lines, and
+# plain `-R` processes input line-by-line, emitting one JSON array per line
+# instead of one array for the whole text. A caller that then does
+# `--argjson pk "$(routes_normalize_keywords "$multiline_prompt")"` gets
+# multiple concatenated arrays, which is invalid JSON and makes jq fail --
+# silently breaking route matching for any multi-line prompt.
 routes_normalize_keywords() {
   local text="$1"
-  jq -R -c '
+  jq -Rs -c '
     ascii_downcase
     | gsub("[^a-z0-9 ]"; " ")
     | split(" ")
