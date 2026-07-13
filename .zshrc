@@ -15,4 +15,8 @@ fpath=(~/dotfiles $fpath)
 autoload -Uz compinit && compinit
 
 # .zprofileの読み込み
-source ~/.zprofile
+# ログインシェルでは zsh が既に .zprofile を読込済みなので、非ログイン
+# シェル（自動読込されない）の時だけ読み込んで二重ロードを避ける
+if [[ ! -o login && -f ~/.zprofile ]]; then
+  source ~/.zprofile
+fi
