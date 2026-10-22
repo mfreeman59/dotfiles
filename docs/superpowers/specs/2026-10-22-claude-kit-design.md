@@ -66,7 +66,7 @@ claude/
    ├─ hooks/hooks.json               SessionStart、SessionEnd（どちらも bin/kit hook を呼ぶ）
    ├─ skills/discover/SKILL.md       /discover
    ├─ bin/kit                        CLI 本体（§9）
-   ├─ lib/                           state.sh / merge.jq / apply.sh / git.sh / catalog.sh / digest.sh / detach.sh
+   ├─ lib/                           common.sh / detach.sh / local_state.sh / merge.jq / merge.sh / apply.sh / git.sh / sync.sh / status.sh / hook.sh（発見の catalog.sh / digest.sh などは計画 2 で追加）
    └─ tests/run.sh
 ```
 
@@ -140,7 +140,8 @@ claude/
 |---|---|
 | `base.json` | 前回の同期で合意した管理セクション（3 者比較の基準 B） |
 | `sync.json` | 最後に同期が成功した時刻、項目ごとの連続失敗回数 |
-| `notices.json` | ユーザーに表示する通知の待ち行列（`[{level, message, at}]`） |
+| `notices.jsonl` | ユーザーに表示する通知の待ち行列。1 行 1 件の JSON（`{level, message, at}`）。追記は 1 行の書き込みで、取り出しはファイルを rename してから読むので、取り出し中の追記は次回分として残る |
+| `notice-history.json` | 警告ごとの最後の通知時刻（同じ警告を繰り返さないため。§8.4） |
 | `lock/` | 排他用ディレクトリ（`mkdir` の成否でロックする） |
 | `sync.log` | 実行ログ（直近 1,000 行まで残す） |
 | `catalog.json` | `claude plugin list --available --json` のキャッシュ（24 時間有効） |
@@ -153,7 +154,7 @@ claude/
 
 | きっかけ | 動作 |
 |---|---|
-| SessionStart（matcher `startup|resume`、`kit hook session-start`） | ① `notices.json` と未処理のおすすめを読んで通知を出力し（§8.4）、`notices.json` を空にする。② `kit sync` と、それに続く `kit discover maybe-run`（§8.2）を切り離したプロセスで起動する。① はネットワークにアクセスしないので、フックはすぐ終わる |
+| SessionStart（matcher `startup|resume`、`kit hook session-start`） | ① `notices.jsonl` と未処理のおすすめを読んで通知を出力し（§8.4）、`notices.jsonl` を空にする。② `kit sync` と、それに続く `kit discover maybe-run`（§8.2）を切り離したプロセスで起動する。① はネットワークにアクセスしないので、フックはすぐ終わる |
 | SessionEnd（`kit hook session-end`） | `kit sync` を切り離したプロセスで起動して、すぐ終わる |
 | `/discover` で導入・却下した直後 | `kit sync` |
 | 手動 | `kit sync`、`kit sync --dry-run`、`kit status` |
@@ -199,7 +200,7 @@ kit のすべてのフックは、環境変数 `KIT_NESTED=1` が設定されて
 
 `discovery` は実状態を持たないので、git の 3 者として扱う。
 
-- **H**: HEAD の manifest
+- **H**: HEAD と `origin/master` の merge-base の manifest。普段は HEAD と同じ。push できなかった kit のコミットが残っているときは、その手前になる（そのコミットに含まれる編集を「W で足したもの」として扱い、失わないため）。`origin/master` がなければ HEAD
 - **W**: 作業ツリーの manifest（`kit dismiss` / `kit watch add` や手での編集を含む）
 - **R**: リモートの manifest
 
@@ -219,7 +220,13 @@ W で足したものは足し、W で消したものは消し、それ以外は 
 4. 3 者比較（§7.3）と discovery のマージ（§7.4）で、新しい manifest M と、このマシンへの操作リストを作る。
 5. 操作リストを実行する（§7.6）。失敗した項目は `sync.json` の連続失敗回数を増やし、成功した項目は 0 に戻す。失敗した項目も M では R の値のままにする（他のマシンの変更を manifest 上で取り消さないため）。
 6. git の前提条件を確認する。dotfiles が master 以外のブランチにある、または rebase / merge / cherry-pick の途中なら、M を作業ツリーに書いて通知し、手順 9 に進む。
-7. 作業ツリーの manifest を HEAD に戻してから `git merge --ff-only origin/master`、M を書き出し、`git commit -m "chore(kit): sync from <hostname>" -- claude/manifest.json`（変更があるときだけ）。
+7. 作業ツリーの manifest を HEAD に戻してから、HEAD を `origin/master` に追いつかせる。
+   - HEAD が `origin/master` の祖先なら `git merge --ff-only origin/master`
+   - `origin/master` が HEAD の祖先なら（push していないコミットがあるだけ）何もしない
+   - 履歴が分岐していて、`origin/master..HEAD` が `chore(kit):` のコミットだけなら `git reset --keep origin/master`（前回 push できなかった kit のコミットを捨てる。その内容は §7.4 で M に取り込み済み）
+   - 履歴が分岐していて、kit 以外のコミットがあれば、M を作業ツリーに書いて通知し、手順 9 に進む
+
+   続けて M を書き出し、`git commit -m "chore(kit): sync from <hostname>" -- claude/manifest.json`（変更があるときだけ）。
 8. `origin/master..master` に `chore(kit):` 以外のコミットがあれば push せずに通知する。なければ `git push origin master`。拒否されたら手順 3 からもう 1 回だけやり直す。それでも駄目なら通知して、次回に回す。
 9. `base.json` を更新する（下記の規則）。git 操作まで含めて成功したときだけ `sync.json` の成功時刻を更新する。ロックを解除する。
 
@@ -256,7 +263,8 @@ git 操作は安全側に倒して止め、必ず通知する。
 | push が拒否された | fetch からもう 1 回だけやり直す。駄目なら次回 |
 | dotfiles が master 以外のブランチ、または rebase / merge / cherry-pick の途中 | git 操作をしない。通知する |
 | master に `chore(kit):` 以外のまだ push していないコミットがある | コミットまでは行い、push しない（作業中のコミットを勝手に公開しない）。通知する |
-| `merge --ff-only` が、手元の未コミットの変更とぶつかって失敗した | M を作業ツリーに書いて保留し、通知する |
+| `merge --ff-only` / `reset --keep` が、手元の未コミットの変更とぶつかって失敗した | M を作業ツリーに書いて保留し、通知する |
+| master と `origin/master` の履歴が分岐していて、kit 以外のコミットがある | M を作業ツリーに書いて保留し、通知する（手で rebase などしてもらう） |
 | 項目の反映に失敗した | ログに残して通知し、次回再試行する。同じ項目が 3 回続けて失敗したら、それ以降は再試行せずに通知だけにする（manifest から消えるか、手で `kit sync --retry <項目>` するまで） |
 | command-source のプラグイン | 自動では入れない。通知する |
 | jq / gh / npx / claude のいずれかがない | 必要とする処理だけ飛ばして通知する。jq か git がなければ何もしない |
@@ -352,7 +360,8 @@ KIT_NESTED=1 claude -p \
 
 `systemMessage` は、フックの共通出力として「ユーザーに表示される」とドキュメントにある。ただし SessionStart で表示されるかは明記されていないため、実装の最初に確かめる（§13）。
 
-- `notices.json` に溜まった通知はすべて表示して、空にする。同じ文面のものは 1 つにまとめる。
+- `notices.jsonl` に溜まった通知はすべて表示して、空にする。同じ文面のものは 1 つにまとめる。
+- 警告（level が `warn`）は、同じ文面のものを 6 時間に 1 回までしか通知キューに入れない。master 以外のブランチで作業している間など、同期のたびに同じ警告が出続けるのを防ぐため。
 - 未処理のおすすめが 1 件以上あれば「🔎 おすすめ N 件 — /discover で確認」と表示する。並列セッションでうるさくならないよう、同じ日には 1 回だけ（`discover/last-notified` に日付を記録）。
 - おすすめは、次の分析で置き換わるまで、または `/discover` で全件を処理するまで「未処理」とする。
 
