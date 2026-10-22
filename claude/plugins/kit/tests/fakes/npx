@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# テスト用の偽 npx（skills CLI の add と remove だけ）。状態は $HOME/.agents/.skill-lock.json。
+set -uo pipefail
+echo "npx $*" >>"${FAKE_DIR}/calls.log"
+lock="${HOME}/.agents/.skill-lock.json"
+mkdir -p "$(dirname "$lock")"
+[ -f "$lock" ] || echo '{"version":3,"skills":{}}' >"$lock"
+upd() { local tmp; tmp="$(mktemp)"; jq "$@" "$lock" >"$tmp" && mv "$tmp" "$lock"; }
+[ "${1:-}" = "--yes" ] && shift
+[ "${1:-}" = skills ] || exit 2
+shift
+case "${1:-}" in
+  add)
+    src="$2"; name=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in -s) name="$2"; shift ;; esac
+      shift
+    done
+    if [ -f "${FAKE_DIR}/npx-fail" ] && grep -qx -- "$name" "${FAKE_DIR}/npx-fail"; then exit 1; fi
+    upd --arg n "$name" --arg s "$src" '.skills[$n] = {source: $s, sourceType: "github"}' ;;
+  remove) upd --arg n "$2" 'del(.skills[$n])' ;;
+  *) exit 2 ;;
+esac

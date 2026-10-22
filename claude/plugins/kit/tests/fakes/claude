@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# テスト用の偽 claude（plugin サブコマンドの一部だけ）。
+# 状態は $FAKE_DIR/claude.json、呼び出しは $FAKE_DIR/calls.log に記録する。
+set -uo pipefail
+state="${FAKE_DIR}/claude.json"
+echo "claude $*" >>"${FAKE_DIR}/calls.log"
+[ -n "${FAKE_SLOW:-}" ] && sleep "$FAKE_SLOW"
+[ "${FAKE_BROKEN:-}" = 1 ] && { echo "fake failure" >&2; exit 1; }
+upd() { local tmp; tmp="$(mktemp)"; jq "$@" "$state" >"$tmp" && mv "$tmp" "$state"; }
+in_list() { jq -e --arg x "$2" --arg l "$1" '.[$l] | index($x) != null' "$state" >/dev/null; }
+
+[ "${1:-}" = plugin ] || exit 2
+shift
+case "${1:-} ${2:-}" in
+  "list --json")
+    jq -c '[.plugins[] | {id, scope: (.scope // "user"), enabled, version: "1.0.0"}]' "$state" ;;
+  "marketplace list")
+    jq -c '[.marketplaces[] | . + {installLocation: "/tmp/fake"}]' "$state" ;;
+  "marketplace add")
+    src="$3"
+    in_list fail "$src" && { echo "fake: add failed" >&2; exit 1; }
+    name="${FAKE_MKT_NAME:-${src##*/}}"
+    upd --arg n "$name" --arg r "$src" '.marketplaces |= (map(select(.name != $n)) + [{name: $n, source: "github", repo: $r}])' ;;
+  "marketplace remove")
+    upd --arg n "$3" '.marketplaces |= map(select(.name != $n))' ;;
+  install*)
+    id="$2"
+    if in_list command_source "$id"; then
+      printf '{"command":"install","outcome":"failed","plugin":"%s","shownCommand":{"command":"make","sha256":"abc"}}\n' "$id"
+      exit 1
+    fi
+    if in_list fail "$id"; then
+      printf '{"command":"install","outcome":"failed","plugin":"%s","message":"boom"}\n' "$id"
+      exit 1
+    fi
+    upd --arg id "$id" '.plugins |= (map(select(.id != $id)) + [{id: $id, enabled: true}])'
+    printf '{"command":"install","outcome":"installed","plugin":"%s"}\n' "$id" ;;
+  uninstall*) upd --arg id "$2" '.plugins |= map(select(.id != $id))' ;;
+  enable*) upd --arg id "$2" '.plugins |= map(if .id == $id then .enabled = true else . end)' ;;
+  disable*) upd --arg id "$2" '.plugins |= map(if .id == $id then .enabled = false else . end)' ;;
+  *) echo "fake claude: 未対応: plugin $*" >&2; exit 2 ;;
+esac
