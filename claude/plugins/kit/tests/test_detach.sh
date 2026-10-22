@@ -31,4 +31,9 @@ kit_detach /bin/sh -c "echo from-child"
 sleep 1
 assert_contains "$(cat "${KIT_STATE}/sync.log" 2>/dev/null)" "from-child" "子の出力は sync.log に追記される"
 
+# 切り離した処理はプロジェクトのディレクトリではなく / で動く（レビュー I1）
+(cd "$T_TMP" && kit_detach /bin/sh -c "pwd >'${T_TMP}/cwd'")
+sleep 1
+assert_eq "$(cat "${T_TMP}/cwd" 2>/dev/null)" "/" "切り離した処理の作業ディレクトリは /"
+
 t_done

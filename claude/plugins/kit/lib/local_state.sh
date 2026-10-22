@@ -6,9 +6,9 @@
 # どれかの読み取りに失敗したら 1 を返す。空として扱うと、全項目の削除が他のマシンに広がってしまうため。
 kit_local_state() {
   local mkts plugins lock skills
-  mkts="$(claude plugin marketplace list --json </dev/null 2>/dev/null)" || return 1
+  mkts="$(kit_claude plugin marketplace list --json </dev/null 2>/dev/null)" || return 1
   jq -e 'type == "array"' >/dev/null 2>&1 <<<"$mkts" || return 1
-  plugins="$(claude plugin list --json </dev/null 2>/dev/null)" || return 1
+  plugins="$(kit_claude plugin list --json </dev/null 2>/dev/null)" || return 1
   jq -e 'type == "array"' >/dev/null 2>&1 <<<"$plugins" || return 1
   lock="${HOME}/.agents/.skill-lock.json"
   if [ -f "$lock" ]; then

@@ -14,6 +14,7 @@ KIT_LOCK_STALE_SECONDS="${KIT_LOCK_STALE_SECONDS:-600}"
 KIT_FETCH_TIMEOUT="${KIT_FETCH_TIMEOUT:-10}"
 KIT_PUSH_TIMEOUT="${KIT_PUSH_TIMEOUT:-20}"
 KIT_MAX_FAILURES="${KIT_MAX_FAILURES:-3}"
+KIT_REMOVAL_GUARD="${KIT_REMOVAL_GUARD:-3}"
 KIT_NOTICE_SUPPRESS_SECONDS="${KIT_NOTICE_SUPPRESS_SECONDS:-21600}"
 KIT_EMPTY_MANIFEST='{"version":1,"marketplaces":{},"plugins":{},"skills":{},"discovery":{"watch":[],"dismissed":[]}}'
 
@@ -34,6 +35,10 @@ kit_now() { date +%s; }
 kit_iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 kit_require() { command -v "$1" >/dev/null 2>&1; }
 
+# kit_claude <args...>: claude を / で実行する。plugin list の enabled などは、作業ディレクトリの
+# プロジェクト設定（.claude/settings*.json の enabledPlugins）で上書きされる。ユーザースコープの値を読み書きするため / で動かす
+kit_claude() { (cd / && claude "$@"); }
+
 kit_log() {
   kit_init_state
   printf '%s %s\n' "$(kit_iso_now)" "$*" >>"${KIT_STATE}/sync.log"
@@ -50,9 +55,10 @@ kit_trim_log() {
 # kit_write_json <path> <json>: キーをソートしインデント 2 で、一時ファイル経由で原子的に書く
 kit_write_json() {
   local path="$1" json="$2" tmp
+  [ -n "$json" ] || return 1
   mkdir -p "$(dirname "$path")"
   tmp="$(mktemp "${path}.XXXXXX")"
-  if printf '%s' "$json" | jq -S --indent 2 . >"$tmp" 2>/dev/null; then
+  if printf '%s' "$json" | jq -S --indent 2 . >"$tmp" 2>/dev/null && [ -s "$tmp" ]; then
     mv "$tmp" "$path"
   else
     rm -f "$tmp"
@@ -60,9 +66,11 @@ kit_write_json() {
   fi
 }
 
-# kit_read_json <path> <default-json>: ファイルがないか壊れていれば既定値
+# kit_read_json <path> <default-json>: ファイルがない・空・壊れていれば既定値
 kit_read_json() {
-  if [ -f "$1" ]; then jq -c . "$1" 2>/dev/null || printf '%s' "$2"; else printf '%s' "$2"; fi
+  local out=""
+  [ -f "$1" ] && out="$(jq -c . "$1" 2>/dev/null)"
+  if [ -n "$out" ]; then printf '%s' "$out"; else printf '%s' "$2"; fi
 }
 
 kit_json_eq() { [ "$(jq -cS . <<<"$1")" = "$(jq -cS . <<<"$2")" ]; }

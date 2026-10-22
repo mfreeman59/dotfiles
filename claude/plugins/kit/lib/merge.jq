@@ -44,19 +44,36 @@ def kit_discovery_merge($H; $W; $R):
   { watch: kit_set_merge(($H.discovery.watch // []); ($W.discovery.watch // []); ($R.discovery.watch // [])),
     dismissed: kit_by_id_merge(($H.discovery.dismissed // []); ($W.discovery.dismissed // []); ($R.discovery.dismissed // [])) };
 
-# 入力 {L, B, R, H, W, failures, max_failures}
+# 大量削除の歯止め: 1 回の同期での削除（このマシンでの削除と、他のマシンでの削除の反映）が removal_guard 件以上あり、
+# allow_removals でなければ、すべて止める。CLI の異常（list が [] を返す）や manifest の取り違えで、
+# 全マシンから一斉に消えるのを防ぐ。止めたこのマシンでの削除は manifest に書かず（m を R に戻す）、
+# 止めた他のマシンでの削除は反映しない。どちらも base は更新されないので、次の同期でまた判定される。
+def kit_guard_removals($items; $in):
+  ([$items[] | select(.kind == "local" and .m == null) | {section, key, direction: "local"}]
+   + [$items[] | select(.m == null and .l != null and .failures < $in.max_failures) | {section, key, direction: "remote"}]) as $removals
+  | (if ($removals | length) >= ($in.removal_guard // 3) and (($in.allow_removals // false) | not)
+     then $removals else [] end) as $blocked
+  | { blocked: $blocked,
+      items: [$items[] | . as $i
+              | if any($blocked[]; .section == $i.section and .key == $i.key)
+                then (if $i.kind == "local" then .m = .r else . end) + {blocked: true}
+                else . end] };
+
+# 入力 {L, B, R, H, W, failures, max_failures, allow_removals, removal_guard}
 def merge3:
   . as $in
-  | ([kit_sections[] as $s | kit_merge_section($s; $in.L[$s]; $in.B[$s]; $in.R[$s]; $in.failures)] | add) as $items
+  | kit_guard_removals([kit_sections[] as $s | kit_merge_section($s; $in.L[$s]; $in.B[$s]; $in.R[$s]; $in.failures)] | add; $in) as $g
+  | $g.items as $items
   | { M: ({version: 1, discovery: kit_discovery_merge($in.H; $in.W; $in.R)}
           + ([kit_sections[] as $s
               | {key: $s, value: ([$items[] | select(.section == $s and .m != null) | {key, value: .m.v}] | from_entries)}]
              | from_entries)),
-      ops: [$items[] | select(.m != .l and .failures < $in.max_failures)
+      ops: [$items[] | select(.m != .l and .failures < $in.max_failures and (.blocked | not))
             | {section, key, op: kit_op(.), from: .l.v, to: .m.v}],
       skipped: [$items[] | select(.m != .l and .failures >= $in.max_failures) | {section, key}],
       conflicts: [$items[] | select(.kind == "conflict") | {section, key, local: .l.v, remote: .r.v, chosen: .m.v}],
-      local_changes: [$items[] | select(.kind == "local") | {section, key}] };
+      local_changes: [$items[] | select(.kind == "local" and (.blocked | not)) | {section, key}],
+      blocked_removals: $g.blocked };
 
 # 入力 {M, L2, R2, B}。反映後のローカル L2 と push 後のリモート R2 がどちらも M と一致する項目だけ M の値にし、
 # それ以外は前の B の値を残す（B は「ローカルとリモートの両方で合意できた値」だけを表す）

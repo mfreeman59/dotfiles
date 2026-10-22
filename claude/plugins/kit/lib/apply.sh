@@ -11,27 +11,35 @@ kit_mkt_add_arg() {
   jq -r 'if .source == "github" then .repo elif (.source == "git" or .source == "url") then .url else "" end' <<<"$1"
 }
 
+# 本物の CLI の `marketplace remove` は、そのマーケットプレイスのプラグインを（スコープを問わず）アンインストールし、
+# データも消す。そのため、ソースの変更を「削除して追加」で反映したり、プラグインが残っているのに削除したりすると、
+# プラグインの削除が「このマシンでの変更」として全マシンに広がってしまう。どちらも自動では行わない。
 kit_apply_marketplace() {  # <op-json> <M-json>
   local op="$1" m="$2" key kind arg out
   key="$(jq -r .key <<<"$op")"
   kind="$(jq -r .op <<<"$op")"
-  if [ "$kind" = remove ]; then
-    if jq -e --arg k "$key" '(.plugins // {}) | keys | any(endswith("@" + $k))' <<<"$m" >/dev/null; then
-      kit_apply_result marketplaces "$key" remove deferred "このマーケットプレイスのプラグインが manifest に残っているため、削除を保留しました"
-    elif out="$(claude plugin marketplace remove "$key" --scope user 2>&1)"; then
-      kit_apply_result marketplaces "$key" remove ok ""
-    else
-      kit_apply_result marketplaces "$key" remove failed "$out"
-    fi
-    return 0
-  fi
+  case "$kind" in
+    change)
+      kit_apply_result marketplaces "$key" change deferred \
+        "マーケットプレイス ${key} のソースが他のマシンで $(jq -c .to <<<"$op") に変わりました。プラグインを巻き込まないよう自動では登録し直しません。必要なら手動で登録し直してください"
+      return 0 ;;
+    remove)
+      if jq -e --arg k "$key" '(.plugins // {}) | keys | any(endswith("@" + $k))' <<<"$m" >/dev/null ||
+        kit_claude plugin list --json 2>/dev/null | jq -e --arg k "$key" 'any(.[]; .id | endswith("@" + $k))' >/dev/null; then
+        kit_apply_result marketplaces "$key" remove deferred "マーケットプレイス ${key} のプラグインがまだ使われている（プロジェクトスコープを含む）ため、削除を保留しました"
+      elif out="$(kit_claude plugin marketplace remove "$key" --scope user 2>&1)"; then
+        kit_apply_result marketplaces "$key" remove ok ""
+      else
+        kit_apply_result marketplaces "$key" remove failed "$out"
+      fi
+      return 0 ;;
+  esac
   arg="$(kit_mkt_add_arg "$(jq -c .to <<<"$op")")"
   if [ -z "$arg" ]; then
     kit_apply_result marketplaces "$key" "$kind" failed "対応していないソースです"
     return 0
   fi
-  [ "$kind" = change ] && claude plugin marketplace remove "$key" --scope user >/dev/null 2>&1
-  if out="$(claude plugin marketplace add "$arg" --scope user 2>&1)"; then
+  if out="$(kit_claude plugin marketplace add "$arg" --scope user 2>&1)"; then
     kit_apply_result marketplaces "$key" "$kind" ok ""
   else
     kit_apply_result marketplaces "$key" "$kind" failed "$out"
@@ -45,7 +53,7 @@ kit_apply_plugin() {  # <op-json>
   to="$(jq -r .to <<<"$op")"
   case "$kind" in
     add)
-      if ! out="$(claude plugin install "$key" -s user --json 2>/dev/null)"; then
+      if ! out="$(kit_claude plugin install "$key" -s user --json 2>/dev/null)"; then
         if jq -e '.shownCommand' <<<"$out" >/dev/null 2>&1; then
           kit_apply_result plugins "$key" add needs_approval "インストール時にコマンドを実行するプラグインです"
         else
@@ -54,13 +62,13 @@ kit_apply_plugin() {  # <op-json>
         fi
         return 0
       fi
-      if [ "$to" = false ] && ! claude plugin disable "$key" -s user >/dev/null 2>&1; then
+      if [ "$to" = false ] && ! kit_claude plugin disable "$key" -s user >/dev/null 2>&1; then
         kit_apply_result plugins "$key" add failed "インストール後の無効化に失敗しました"
         return 0
       fi
       kit_apply_result plugins "$key" add ok "" ;;
     remove)
-      if out="$(claude plugin uninstall "$key" -s user 2>&1)"; then
+      if out="$(kit_claude plugin uninstall "$key" -s user --keep-data 2>&1)"; then
         kit_apply_result plugins "$key" remove ok ""
       else
         kit_apply_result plugins "$key" remove failed "$out"
@@ -68,7 +76,7 @@ kit_apply_plugin() {  # <op-json>
     change)
       verb=disable
       [ "$to" = true ] && verb=enable
-      if out="$(claude plugin "$verb" "$key" -s user 2>&1)"; then
+      if out="$(kit_claude plugin "$verb" "$key" -s user 2>&1)"; then
         kit_apply_result plugins "$key" change ok ""
       else
         kit_apply_result plugins "$key" change failed "$out"

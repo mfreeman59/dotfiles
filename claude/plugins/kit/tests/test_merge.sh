@@ -74,4 +74,22 @@ assert_json_eq "$(bu "$(p '{"a":true}')" '{}' "$(p '{"a":true}')" '{}')" '{}' "�
 assert_json_eq "$(bu '{}' '{}' '{}' "$(p '{"a":true}')")" '{}' "削除も合意する"
 assert_json_eq "$(bu "$(p '{"a":false}')" "$(p '{"a":false}')" "$(p '{"a":false}')" '{}')" '{"a":false}' "false も合意する"
 
+# 大量削除の歯止め（レビュー C4）: 1 回の同期で 3 件以上の削除は、--allow-removals がなければ止める
+g3() {  # <L> <B> <R> <allow>
+  kit_merge3 "$(jq -nc --argjson L "$1" --argjson B "$2" --argjson R "$3" --argjson allow "$4" \
+    '{L: $L, B: $B, R: $R, H: {}, W: {}, failures: {}, max_failures: 3, allow_removals: $allow, removal_guard: 3}')"
+}
+abc="$(p '{"a":true,"b":true,"c":true}')"
+r="$(g3 "$(p '{}')" "$abc" "$abc" false)"
+assert_json_eq "$(jq -c .M.plugins <<<"$r")" '{"a":true,"b":true,"c":true}' "このマシンでの 3 件以上の削除は manifest に書かない"
+assert_eq "$(jq '.blocked_removals | length' <<<"$r")" "3" "止めた削除を報告する（このマシン）"
+r="$(g3 "$abc" "$abc" "$(p '{}')" false)"
+assert_json_eq "$(jq -c .ops <<<"$r")" '[]' "他のマシンでの 3 件以上の削除は反映しない"
+assert_eq "$(jq '.blocked_removals | length' <<<"$r")" "3" "止めた削除を報告する（他のマシン）"
+r="$(g3 "$abc" "$abc" "$(p '{}')" true)"
+assert_eq "$(jq '[.ops[] | select(.op == "remove")] | length' <<<"$r")" "3" "--allow-removals なら反映する"
+r="$(g3 "$(p '{"a":true}')" "$abc" "$abc" false)"
+assert_json_eq "$(jq -c .M.plugins <<<"$r")" '{"a":true}' "2 件までの削除は止めない"
+assert_eq "$(jq '.blocked_removals | length' <<<"$r")" "0" "2 件までなら何も止めない"
+
 t_done

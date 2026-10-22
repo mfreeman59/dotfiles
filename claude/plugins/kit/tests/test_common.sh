@@ -10,6 +10,14 @@ kit_write_json "${T_TMP}/x.json" '{'; rc=$?
 assert_eq "$rc" "1" "不正な JSON は書かずに失敗する"
 assert_eq "$(jq -c . "${T_TMP}/x.json")" '{"a":{"c":3,"d":2},"b":1}' "失敗しても元のファイルは残る"
 assert_eq "$(kit_read_json "${T_TMP}/none.json" '{"d":1}')" '{"d":1}' "ないファイルは既定値"
+# 空の JSON を書かない・空のファイルを空の値として読まない（レビュー C2）
+kit_write_json "${T_TMP}/x.json" ''; rc=$?
+assert_eq "$rc" "1" "空の JSON は書かずに失敗する"
+assert_eq "$(jq -c . "${T_TMP}/x.json")" '{"a":{"c":3,"d":2},"b":1}' "空の JSON で既存のファイルを壊さない"
+: >"${T_TMP}/empty.json"
+assert_eq "$(kit_read_json "${T_TMP}/empty.json" '{"d":1}')" '{"d":1}' "空のファイルは既定値"
+printf '<<<<<<< HEAD\n{\n' >"${T_TMP}/bad.json"
+assert_eq "$(kit_read_json "${T_TMP}/bad.json" '{"d":1}')" '{"d":1}' "壊れたファイルは既定値"
 kit_json_eq '{"a":1,"b":2}' '{"b":2,"a":1}'; assert_eq "$?" "0" "キーの順序は比較に影響しない"
 
 # 通知

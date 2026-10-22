@@ -13,7 +13,10 @@ in_list() { jq -e --arg x "$2" --arg l "$1" '.[$l] | index($x) != null' "$state"
 shift
 case "${1:-} ${2:-}" in
   "list --json")
-    jq -c '[.plugins[] | {id, scope: (.scope // "user"), enabled, version: "1.0.0"}]' "$state" ;;
+    # 本物の CLI と同じく、作業ディレクトリのプロジェクト設定（enabledPlugins）が enabled を上書きする
+    proj='{}'
+    [ -f "${PWD}/.claude/settings.json" ] && proj="$(jq -c '.enabledPlugins // {}' "${PWD}/.claude/settings.json")"
+    jq -c --argjson proj "$proj" '[.plugins[] | .id as $id | {id, scope: (.scope // "user"), enabled: (if ($proj | has($id)) then $proj[$id] else .enabled end), version: "1.0.0"}]' "$state" ;;
   "marketplace list")
     jq -c '[.marketplaces[] | . + {installLocation: "/tmp/fake"}]' "$state" ;;
   "marketplace add")
@@ -22,7 +25,8 @@ case "${1:-} ${2:-}" in
     name="${FAKE_MKT_NAME:-${src##*/}}"
     upd --arg n "$name" --arg r "$src" '.marketplaces |= (map(select(.name != $n)) + [{name: $n, source: "github", repo: $r}])' ;;
   "marketplace remove")
-    upd --arg n "$3" '.marketplaces |= map(select(.name != $n))' ;;
+    # 本物の CLI と同じく、そのマーケットプレイスのプラグインも（スコープを問わず）消える
+    upd --arg n "$3" '.marketplaces |= map(select(.name != $n)) | .plugins |= map(select(.id | endswith("@" + $n) | not))' ;;
   install*)
     id="$2"
     if in_list command_source "$id"; then
@@ -35,7 +39,10 @@ case "${1:-} ${2:-}" in
     fi
     upd --arg id "$id" '.plugins |= (map(select(.id != $id)) + [{id: $id, enabled: true}])'
     printf '{"command":"install","outcome":"installed","plugin":"%s"}\n' "$id" ;;
-  uninstall*) upd --arg id "$2" '.plugins |= map(select(.id != $id))' ;;
+  uninstall*)
+    # 本物の CLI と同じく、入っていないプラグインの uninstall は失敗する
+    jq -e --arg id "$2" 'any(.plugins[]; .id == $id)' "$state" >/dev/null || { echo "not installed" >&2; exit 1; }
+    upd --arg id "$2" '.plugins |= map(select(.id != $id))' ;;
   enable*) upd --arg id "$2" '.plugins |= map(if .id == $id then .enabled = true else . end)' ;;
   disable*) upd --arg id "$2" '.plugins |= map(if .id == $id then .enabled = false else . end)' ;;
   *) echo "fake claude: 未対応: plugin $*" >&2; exit 2 ;;

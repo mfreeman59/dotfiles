@@ -24,6 +24,7 @@ cat >"${HOME}/.claude/settings.json" <<'EOF'
 EOF
 ln -s /nonexistent "${HOME}/.claude/skills/skillsh-router"
 echo '{"version":3,"skills":{"find-skills":{"source":"vercel-labs/skills"}}}' >"${HOME}/.agents/.skill-lock.json"
+chmod 600 "${HOME}/.claude/settings.json"
 
 /bin/bash "${CLAUDE_DIR}/bootstrap.sh" --no-sync >/dev/null 2>&1; rc=$?
 assert_eq "$rc" "0" "成功する"
@@ -34,6 +35,7 @@ assert_eq "$(jq -c '.hooks | has("UserPromptSubmit")' <<<"$settings")" "false" "
 assert_eq "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' <<<"$settings")" "bash guard.sh" "無関係なフックは残す"
 assert_eq "$(jq -r .theme <<<"$settings")" "dark" "他の設定は残す"
 assert_eq "$(ls "${HOME}/.claude/backups" | wc -l | tr -d ' ')" "1" "バックアップを取る"
+assert_eq "$(stat -f %Lp "${HOME}"/.claude/backups/*)" "600" "バックアップは元の権限（600）を保つ（レビュー M8）"
 assert_eq "$([ -L "${HOME}/.claude/skills/skillsh-router" ] && echo yes || echo no)" "no" "v1 のリンクを消す"
 assert_eq "$(jq -r '.skills | has("find-skills")' "${HOME}/.agents/.skill-lock.json")" "false" "find-skills を外す"
 assert_eq "$(cat "${KIT_STATE_DIR}/dotfiles-path")" "$(cd "${CLAUDE_DIR}/.." && pwd)" "dotfiles の場所を記録する"

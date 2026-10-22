@@ -14,7 +14,7 @@ kit_status() {
   [ -f "${KIT_STATE}/notices.jsonl" ] && n="$(wc -l <"${KIT_STATE}/notices.jsonl" | tr -d ' ')"
   echo "まだ表示していない通知: ${n} 件"
   jq -r '(.failures // {}) | to_entries[] | "失敗が続いている項目: \(.key)（\(.value) 回）"' <<<"$st"
-  claude plugin marketplace list --json </dev/null 2>/dev/null |
+  kit_claude plugin marketplace list --json </dev/null 2>/dev/null |
     jq -r '.[]? | select(.name != "dotfiles" and (.source == "directory" or .source == "file"))
       | "管理対象外: マーケットプレイス \(.name)（ローカルパスのため同期しません）"' 2>/dev/null
   echo "--- 同期の計画（kit sync --dry-run）"

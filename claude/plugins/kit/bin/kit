@@ -13,7 +13,8 @@ done
 kit_usage() {
   cat <<'EOF'
 usage: kit <command>
-  sync [--dry-run] [--force] [--retry <section/key>]   manifest とこのマシンを同期する
+  sync [--dry-run] [--force] [--retry <section/key>] [--allow-removals]
+                                                       manifest とこのマシンを同期する
   status                                               同期の状態と次の同期の計画を表示する
   hook session-start|session-end                       Claude Code のフック用
 EOF

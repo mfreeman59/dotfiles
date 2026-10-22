@@ -49,8 +49,23 @@ assert_eq "$(st old)" "ok" "プラグインが残っていなければ削除す�
 assert_eq "$(fake_calls)" "$(printf '%s\n' \
   "npx --yes skills remove s1 -g -y" \
   "npx --yes skills add o/r2 -s s1 -g -y -a claude-code" \
-  "claude plugin marketplace remove old --scope user")" "スキルの change は削除してから追加、マーケットプレイスの削除は最後"
+  "claude plugin list --json" \
+  "claude plugin marketplace remove old --scope user")" "スキルの change は削除してから追加、マーケットプレイスの削除は最後（使われていないことを確かめてから）"
 
 assert_eq "$(kit_apply '[]' '{}')" "[]" "操作がなければ空の配列"
+
+# マーケットプレイスの変更・削除でプラグインを巻き込まない、データを消さない（レビュー C3 / I4 / I3）
+: >"${FAKE_DIR}/calls.log"
+fake_set '.marketplaces = [{"name":"m1","source":"github","repo":"x/m1"},{"name":"wf","source":"github","repo":"w/wf"}]
+  | .plugins = [{"id":"z@m1","enabled":true},{"id":"pp@wf","enabled":true,"scope":"project"}]'
+res="$(kit_apply '[
+  {"section":"marketplaces","key":"m1","op":"change","from":{"source":"github","repo":"x/m1"},"to":{"source":"github","repo":"x/fork"}},
+  {"section":"marketplaces","key":"wf","op":"remove","from":{"source":"github","repo":"w/wf"},"to":null},
+  {"section":"plugins","key":"z@m1","op":"remove","from":true,"to":null}]' '{"plugins":{}}')"
+assert_eq "$(st m1)" "deferred" "マーケットプレイスのソース変更は自動で反映しない"
+assert_eq "$(st wf)" "deferred" "プロジェクトスコープで使われているマーケットプレイスは削除しない"
+assert_not_contains "$(fake_calls)" "marketplace remove" "マーケットプレイスを削除しない"
+assert_not_contains "$(fake_calls)" "marketplace add" "マーケットプレイスを追加し直さない"
+assert_contains "$(fake_calls)" "claude plugin uninstall z@m1 -s user --keep-data" "アンインストールはプラグインのデータを残す"
 
 t_done

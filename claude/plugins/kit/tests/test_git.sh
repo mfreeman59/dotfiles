@@ -113,4 +113,31 @@ t_scenario "kit 以外の未 push コミット" s_foreign_unpushed
 t_scenario "merge-base の manifest" s_base_manifest
 t_scenario "manifest だけをコミット" s_commit_only_manifest
 t_scenario "オフライン" s_fetch_offline
+
+# kit のコミットは「件名が chore(kit): sync from」かつ「manifest だけを変更」で見分ける（レビュー I2）
+s_user_chore_kit_commit() {
+  g_setup
+  kit_git_fetch
+  a_commit other.txt v2 "chore(kit): bump plugin version"
+  kit_git_foreign_unpushed; assert_eq "$?" "0" "件名が chore(kit) でも kit のものとはみなさない"
+  b_push README.md b "docs: b"
+  kit_git_fetch; kit_git_update; assert_eq "$?" "2" "ユーザーのコミットを reset で捨てない"
+}
+s_kit_subject_other_file() {
+  g_setup
+  kit_git_fetch
+  a_commit mine.txt m "chore(kit): sync from x"
+  kit_git_foreign_unpushed; assert_eq "$?" "0" "manifest 以外を変更したコミットは kit のものとみなさない"
+}
+# manifest がない版と、壊れた版を区別する（レビュー C2 / C4）
+s_show_manifest_invalid() {
+  g_setup
+  a_commit claude/manifest.json '<<<<<<< HEAD' "fix: oops"
+  kit_git_show_manifest HEAD >/dev/null; assert_eq "$?" "2" "壊れた manifest は 2"
+  kit_git_has_manifest HEAD; assert_eq "$?" "0" "manifest がある版"
+  kit_git_has_manifest HEAD~1; assert_eq "$?" "1" "manifest がない版"
+}
+t_scenario "ユーザーの chore(kit) コミット" s_user_chore_kit_commit
+t_scenario "kit の件名で manifest 以外を変更したコミット" s_kit_subject_other_file
+t_scenario "壊れた manifest とない manifest" s_show_manifest_invalid
 t_done

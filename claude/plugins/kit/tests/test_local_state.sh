@@ -34,4 +34,10 @@ rm "${HOME}/.agents/.skill-lock.json"
 (export FAKE_BROKEN=1; kit_local_state >/dev/null); rc=$?
 assert_eq "$rc" "1" "claude が失敗したら失敗する（空として扱わない。Review Focus 1）"
 
+# 作業ディレクトリのプロジェクト設定（enabledPlugins）に影響されない（レビュー I1）
+mkdir -p "${T_TMP}/proj/.claude"
+echo '{"enabledPlugins":{"a@official":false,"b@agents":true}}' >"${T_TMP}/proj/.claude/settings.json"
+got="$(cd "${T_TMP}/proj" && kit_local_state | jq -c '[.plugins["a@official"], .plugins["b@agents"]]')"
+assert_eq "$got" "[true,false]" "プロジェクトの設定で上書きされる前のユーザースコープの値を読む"
+
 t_done
