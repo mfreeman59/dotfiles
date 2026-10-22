@@ -139,7 +139,7 @@ claude/
 | パス | 内容 |
 |---|---|
 | `base.json` | 前回の同期で合意した管理セクション（3 者比較の基準 B） |
-| `sync.json` | 最後に同期が成功した時刻、項目ごとの連続失敗回数 |
+| `sync.json` | 最後に同期が成功した時刻、項目ごとの連続失敗回数、fetch / push できなくなった時刻（`offline_since`） |
 | `notices.jsonl` | ユーザーに表示する通知の待ち行列。1 行 1 件の JSON（`{level, message, at}`）。追記は 1 行の書き込みで、取り出しはファイルを rename してから読むので、取り出し中の追記は次回分として残る |
 | `notice-history.json` | 警告ごとの最後の通知時刻（同じ警告を繰り返さないため。§8.4） |
 | `lock/` | 排他用ディレクトリ（`mkdir` の成否でロックする） |
@@ -201,7 +201,7 @@ kit のすべてのフックは、環境変数 `KIT_NESTED=1` が設定されて
 `discovery` は実状態を持たないので、git の 3 者として扱う。
 
 - **H**: HEAD と `origin/master` の merge-base の manifest。普段は HEAD と同じ。push できなかった kit のコミットが残っているときは、その手前になる（そのコミットに含まれる編集を「W で足したもの」として扱い、失わないため）。`origin/master` がなければ HEAD
-- **W**: 作業ツリーの manifest（`kit dismiss` / `kit watch add` や手での編集を含む）
+- **W**: 作業ツリーの manifest（`kit dismiss` / `kit watch add` や手での編集を含む）。ファイルがなければ HEAD の manifest（誤って消しても「全部消した」と扱わない）
 - **R**: リモートの manifest
 
 `watch`（文字列の集合）と `dismissed`（`id` をキーとする集合）それぞれについて、次の式で求める。
@@ -216,18 +216,22 @@ W で足したものは足し、W で消したものは消し、それ以外は 
 
 1. 排他ロックを取る（§7.2）。間引きの条件に当てはまれば終わる。
 2. L を読む（§5 の読み取り元。除外対象は取り除く）。
-3. `git -C <dotfiles> fetch origin`（タイムアウト 10 秒）。失敗したら「オフライン」として扱い、R = HEAD の manifest で手順 4〜5 を行い、M を作業ツリーに書き出して手順 9 に進む（7 と 8 は行わない）。
+3. `git -C <dotfiles> fetch origin`（タイムアウト 10 秒）。失敗したら「オフライン」として扱い、手順 4〜5 を行い、M を作業ツリーに書き出して手順 9 に進む（7 と 8 は行わない）。
+   - R はオンラインでもオフラインでも、最後に取得した `origin/master` の manifest。HEAD は使わない（HEAD には push できていないこのマシンの変更が入っていることがあり、それを合意済みにすると後で消してしまう）。`origin/master` を一度も取得していなければ、R は B（リモートからの変更はないものとする）
+   - `origin/master` の manifest が壊れていれば、通知して中止する（空として扱うと空の manifest が push される）
+   - `origin/master` に manifest がなく、B が空でなければ、通知して中止する（manifest を消した変更を受け入れると、全マシンからプラグインが削除される）
 4. 3 者比較（§7.3）と discovery のマージ（§7.4）で、新しい manifest M と、このマシンへの操作リストを作る。
+   - **大量削除の歯止め**: 1 回の同期での削除（このマシンでの削除と、他のマシンでの削除の反映）が 3 件以上あれば、`kit sync --allow-removals` で実行されるまですべて止めて通知する。止めたこのマシンでの削除は manifest に書かず、止めた他のマシンでの削除は反映しない（CLI が一時的に空の一覧を返すなどの異常で、全マシンから一斉に消えるのを防ぐ）
 5. 操作リストを実行する（§7.6）。失敗した項目は `sync.json` の連続失敗回数を増やし、成功した項目は 0 に戻す。失敗した項目も M では R の値のままにする（他のマシンの変更を manifest 上で取り消さないため）。
 6. git の前提条件を確認する。dotfiles が master 以外のブランチにある、または rebase / merge / cherry-pick の途中なら、M を作業ツリーに書いて通知し、手順 9 に進む。
 7. 作業ツリーの manifest を HEAD に戻してから、HEAD を `origin/master` に追いつかせる。
    - HEAD が `origin/master` の祖先なら `git merge --ff-only origin/master`
    - `origin/master` が HEAD の祖先なら（push していないコミットがあるだけ）何もしない
-   - 履歴が分岐していて、`origin/master..HEAD` が `chore(kit):` のコミットだけなら `git reset --keep origin/master`（前回 push できなかった kit のコミットを捨てる。その内容は §7.4 で M に取り込み済み）
+   - 履歴が分岐していて、`origin/master..HEAD` が kit のコミットだけなら（kit のコミット = 件名が `chore(kit): sync from ` で始まり、かつ変更が manifest だけのもの。件名だけでは見分けない） `git reset --keep origin/master`（前回 push できなかった kit のコミットを捨てる。その内容は §7.4 で M に取り込み済み）
    - 履歴が分岐していて、kit 以外のコミットがあれば、M を作業ツリーに書いて通知し、手順 9 に進む
 
    続けて M を書き出し、`git commit -m "chore(kit): sync from <hostname>" -- claude/manifest.json`（変更があるときだけ）。
-8. `origin/master..master` に `chore(kit):` 以外のコミットがあれば push せずに通知する。なければ `git push origin master`。拒否されたら手順 3 からもう 1 回だけやり直す。それでも駄目なら通知して、次回に回す。
+8. `origin/master..master` に kit のコミット以外があれば push せずに通知する。なければ `git push origin master`。拒否されたら手順 3 からもう 1 回だけやり直す。それでも駄目なら通知して、次回に回す。
 9. `base.json` を更新する（下記の規則）。git 操作まで含めて成功したときだけ `sync.json` の成功時刻を更新する。ロックを解除する。
 
 **base.json の更新規則**: 項目ごとに、反映後のローカルの実状態 L′ と、push 後のリモートの manifest R′（push できなかったときは R のまま）が、どちらも M と一致するときだけ B に M の値を書く。それ以外の項目は B を前の値のまま残す。B は「ローカルとリモートの両方で合意できた値」だけを表す。
@@ -245,11 +249,15 @@ W で足したものは足し、W で消したものは消し、それ以外は 
 
 | 対象 | 追加 | 削除 | 値の変更 |
 |---|---|---|---|
-| マーケットプレイス | `claude plugin marketplace add <owner/repo か URL> --scope user` | そのマーケットプレイスのプラグインが M にひとつもなければ `claude plugin marketplace remove <name> --scope user`。あれば削除を保留して通知 | 削除してから追加 |
-| プラグイン | `claude plugin install <id> -s user`。値が `false` なら続けて `claude plugin disable <id> -s user` | `claude plugin uninstall <id> -s user` | `claude plugin enable|disable <id> -s user` |
+| マーケットプレイス | `claude plugin marketplace add <owner/repo か URL> --scope user` | そのマーケットプレイスのプラグインが M にも、このマシンに入っているプラグイン（プロジェクトスコープを含む）にもなければ `claude plugin marketplace remove <name> --scope user`。あれば削除を保留して通知 | 自動では行わず通知する |
+| プラグイン | `claude plugin install <id> -s user`。値が `false` なら続けて `claude plugin disable <id> -s user` | `claude plugin uninstall <id> -s user --keep-data`（プラグインのデータは残す） | `claude plugin enable|disable <id> -s user` |
 | スキル | `npx --yes skills add <source> -s <name> -g -y -a claude-code` | `npx --yes skills remove <name> -g -y` | 削除してから追加 |
 
 マーケットプレイスの追加はプラグインより先に、削除はプラグインより後に行う。`settings.json` を直接書き換えることはしない。
+
+`claude plugin marketplace remove` は、そのマーケットプレイスのプラグインを（スコープを問わず）アンインストールし、データも消す。そのため、マーケットプレイスのソースの変更を「削除して追加」で反映したり、使われているマーケットプレイスを削除したりはしない（プラグインの削除が「このマシンでの変更」として全マシンに広がるため）。
+
+`claude` は常に作業ディレクトリ `/` で実行する。`claude plugin list` の `enabled` などは、作業ディレクトリのプロジェクト設定（`.claude/settings*.json` の `enabledPlugins`）で上書きされるため。
 
 インストール時にコマンドの実行を求めるプラグイン（command-source、`claude plugin install --json` の結果に `shownCommand` が含まれるもの）は自動で入れず、「承認が必要」と通知する。
 
@@ -259,7 +267,10 @@ git 操作は安全側に倒して止め、必ず通知する。
 
 | 状況 | 動作 |
 |---|---|
-| オフライン、または fetch に失敗した | ローカルへの反映と manifest の書き出しだけ行う。コミットと push は次回 |
+| オフライン、または fetch に失敗した | ローカルへの反映と manifest の書き出しだけ行う。コミットと push は次回。fetch / push できない状態が 24 時間以上続いたら通知する |
+| `origin/master` の manifest が壊れている | 何もせずに通知する |
+| `origin/master` に manifest がなく、B が空でない | 何もせずに通知する |
+| 1 回の同期での削除が 3 件以上 | 削除だけを止めて通知する（`kit sync --allow-removals` で確定） |
 | push が拒否された | fetch からもう 1 回だけやり直す。駄目なら次回 |
 | dotfiles が master 以外のブランチ、または rebase / merge / cherry-pick の途中 | git 操作をしない。通知する |
 | master に `chore(kit):` 以外のまだ push していないコミットがある | コミットまでは行い、push しない（作業中のコミットを勝手に公開しない）。通知する |
@@ -399,7 +410,7 @@ KIT_NESTED=1 claude -p \
 | サブコマンド | 動作 |
 |---|---|
 | `kit hook session-start` / `kit hook session-end` | §7.1。フック専用 |
-| `kit sync [--dry-run] [--force] [--retry <項目>]` | §7。`--force` は間引きを無視する。`--retry` は連続失敗で止まった項目を再試行の対象に戻す |
+| `kit sync [--dry-run] [--force] [--retry <項目>] [--allow-removals]` | §7。`--force` は間引きを無視する。`--retry` は連続失敗で止まった項目を再試行の対象に戻す。`--allow-removals` は大量削除の歯止め（§7.5 手順 4）を外す |
 | `kit status` | L と manifest の差分、最後の同期結果、git の前提条件、未処理の通知とおすすめの件数を表示する |
 | `kit discover maybe-run` | §8.2 の起動条件を判定し、満たせば `run` を切り離して起動する |
 | `kit discover run` | §8.2 の分析ジョブ |
