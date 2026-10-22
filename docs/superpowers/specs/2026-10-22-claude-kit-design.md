@@ -48,7 +48,7 @@ skillsh-router（v1）は、`npx skills add -g` で同じパッケージが 3 �
 - プロジェクトスコープのプラグインと、各リポジトリの `.claude/skills`（各リポジトリで管理済み）
 - claude.ai から同期されるスキル・プラグイン（`~/.claude/skills/synced/`、`~/.claude/plugins/synced/`。一方向でアカウント単位の別の仕組み）
 - `settings.json` のその他の設定（permissions、hooks など）
-- `claude/hooks/guard-db-destructive.sh`（barista 固有のため同期しない。移行でもファイル・`settings.json` の参照ともに触らない）
+- DB 破壊ガード `guard-db-destructive.sh`（barista 固有。barista リポジトリの `.claude/hooks/` と `.claude/settings.json` で管理する。dotfiles にあった重複コピーと `~/.claude/settings.json` からの登録は 2026-10-22 に削除済み）
 - 使っていないスキルの削除提案、スキルの自動アップデート、macOS 以外への対応
 
 ## 4. 全体構成
@@ -61,7 +61,6 @@ claude/
 ├─ manifest.json                     同期の正本（git 管理）
 ├─ bootstrap.sh                      新しいマシンの初期化（冪等）
 ├─ README.md
-├─ hooks/guard-db-destructive.sh     既存。kit とは無関係（触らない）
 └─ plugins/kit/
    ├─ .claude-plugin/plugin.json
    ├─ hooks/hooks.json               SessionStart、SessionEnd（どちらも bin/kit hook を呼ぶ）
@@ -409,11 +408,11 @@ KIT_NESTED=1 claude -p \
 1. `feat/claude-kit` ブランチで kit を実装し、テストを通す（この間も v1 は動いたまま）。
 2. `kit sync --dry-run` で、最初の manifest の内容を確認する（ユーザースコープのプラグイン 11 個、マーケットプレイス 2 件、スキル 0 件になる見込み）。
 3. v1 を撤去する。
-   1. `claude/uninstall.sh` で、`settings.json` から v1 のフック（SessionStart / UserPromptSubmit / PostToolUse の `run-hook.cmd` を指すもの）を外す。guard-db-destructive.sh の PreToolUse は残す。
+   1. `claude/uninstall.sh` で、`settings.json` から v1 のフック（SessionStart / UserPromptSubmit / PostToolUse の `run-hook.cmd` を指すもの）を外す。
    2. `~/.claude/skills/skillsh-router` のシンボリックリンクを削除する。
    3. `npx --yes skills remove find-skills -g -y` で find-skills を外す。
 4. `bootstrap.sh` を実行する。初回の同期で manifest が作業ツリーに書き出される（このときはまだ `feat/claude-kit` ブランチなので、§7.7 によりコミットと push はされない）。これを実装と一緒にコミットする。
-5. リポジトリから v1 一式を削除する: `claude/hooks/`（`guard-db-destructive.sh` を除く）、`claude/lib/`、`claude/bin/`、`claude/data/`、`claude/skills/`、`claude/install.sh`、`claude/uninstall.sh`、`claude/.gitignore` の v1 用の記述。v1 ドキュメントの未コミットの日本語訳（`claude/README.md`、`claude/skills/skillsh-router/SKILL.md`）は破棄する。
+5. リポジトリから v1 一式を削除する: `claude/hooks/`、`claude/lib/`、`claude/bin/`、`claude/data/`、`claude/skills/`、`claude/install.sh`、`claude/uninstall.sh`、`claude/.gitignore` の v1 用の記述。v1 ドキュメントの未コミットの日本語訳（`claude/README.md`、`claude/skills/skillsh-router/SKILL.md`）は破棄する。
 6. `claude/README.md` を kit の説明に書き直し、ルートの `README.md` の `claude/` の節を更新する。
 7. master にマージして push する。以後は kit の自動同期が動く。
 
@@ -468,5 +467,5 @@ KIT_NESTED=1 claude -p \
 | 導入の承認 | 候補ごとに承認。却下は全マシンで共有 |
 | 全体の構成 | dotfiles をローカルマーケットプレイスにして、自作プラグイン kit として配布する |
 | 発見ソース | 公式以外のマーケットプレイスも対象。検索は広く、登録は導入時だけ |
-| guard-db-destructive.sh | barista 固有なので同期しない。移行でも触らない |
+| guard-db-destructive.sh | barista 固有なので同期しない。barista リポジトリ側に一本化し、dotfiles の重複とユーザー設定からの登録は削除した |
 | v1 ドキュメントの未コミットの日本語訳 | 破棄する |
