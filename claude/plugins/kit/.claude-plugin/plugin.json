@@ -1,0 +1,6 @@
+{
+  "name": "kit",
+  "version": "0.1.0",
+  "description": "スキル・プラグインの発見と、複数マシン間の同期",
+  "author": { "name": "MATSUDA Kengo" }
+}

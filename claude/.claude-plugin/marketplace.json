@@ -1,0 +1,13 @@
+{
+  "name": "dotfiles",
+  "owner": { "name": "MATSUDA Kengo" },
+  "metadata": { "description": "dotfiles で管理する個人用の Claude Code プラグイン" },
+  "plugins": [
+    {
+      "name": "kit",
+      "source": "./plugins/kit",
+      "description": "スキル・プラグインの発見と、複数マシン間の同期",
+      "author": { "name": "MATSUDA Kengo" }
+    }
+  ]
+}

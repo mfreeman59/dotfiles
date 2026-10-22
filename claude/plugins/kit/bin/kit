@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# kit: Claude Code のスキル・プラグインを複数マシンで同期する CLI。
+# 設計書: docs/superpowers/specs/2026-10-22-claude-kit-design.md
+set -uo pipefail
+
+KIT_BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/common.sh
+. "${KIT_BIN_DIR}/../lib/common.sh"
+for f in "${KIT_BIN_DIR}"/../lib/*.sh; do
+  case "$f" in */common.sh) ;; *) . "$f" ;; esac
+done
+
+kit_usage() {
+  cat <<'EOF'
+usage: kit <command>
+  sync [--dry-run] [--force] [--retry <section/key>]   manifest とこのマシンを同期する
+  status                                               同期の状態と次の同期の計画を表示する
+  hook session-start|session-end                       Claude Code のフック用
+EOF
+}
+
+case "${1:-}" in
+  sync) shift; kit_sync "$@" ;;
+  status) kit_status ;;
+  hook) shift; kit_hook "$@"; exit 0 ;;
+  -h | --help | help) kit_usage ;;
+  *) kit_usage >&2; exit 2 ;;
+esac
