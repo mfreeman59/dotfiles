@@ -59,6 +59,36 @@ assert_eq "$(jqc 'kit_recommendations([])' <<<'{"recommendations":[{"id":"x"}]}'
 seven="$(jq -nc '[range(0; 7) | {kind: "plugin", id: "p\(.)@m", name: "p", source: "./p", need: "T", signals: {}}]')"
 assert_eq "$(jq -nc --argjson c "$seven" '{recommendations: [$c[] | {id, need: "T", reason: "r", overlap: ""}]}' | jqc "kit_recommendations(${seven})" | jq length)" "5" "最大 5 件"
 
+srcs='[
+ {"kind":"plugin","id":"a@m","source":{"source":"github","repo":"o/gh"}},
+ {"kind":"plugin","id":"b@m","source":{"source":"url","url":"https://github.com/o/u.git"}},
+ {"kind":"plugin","id":"c@m","source":{"source":"git-subdir","url":"https://github.com/o/a.b","path":"x"}},
+ {"kind":"plugin","id":"d@m","source":{"source":"url","url":"https://gitlab.com/o/x.git"}},
+ {"kind":"plugin","id":"e@m","source":"./p","marketplace_source":"o/w"},
+ {"kind":"plugin","id":"f@m","source":"./p"},
+ {"kind":"plugin","id":"g@m","source":{"source":"github","repo":"../x"}},
+ {"kind":"skill","id":"o/r@s","source":"o/r","skill":"s"},
+ {"kind":"watch","id":"g/db","source":"g/db"}]'
+assert_eq "$(jqc 'map(kit_candidate_repo)' <<<"$srcs")" '["o/gh","o/u","o/a.b",null,"o/w",null,null,"o/r","g/db"]' \
+  "候補の GitHub リポジトリ（GitHub 以外の取得元、所属の分からない相対パス、owner/repo の形でないものは null）"
+
+repos='{"o/gh":{"info":{"stargazers_count":12,"created_at":"2026-10-03T10:06:42Z","pushed_at":"2026-10-07T14:57:03Z","archived":false,"owner_type":"User"},"contributors":{"count":1}},
+ "o/r":{"info":{"stargazers_count":3000,"created_at":"2025-01-01T00:00:00Z","pushed_at":"2026-10-20T00:00:00Z","archived":true,"owner_type":"Organization"},"contributors":{"count":100}},
+ "x/none":{"info":{},"contributors":{}}}'
+out="$(jqc "kit_with_repo_signals(${repos})" <<<'[
+ {"kind":"plugin","id":"a@m","source":{"source":"github","repo":"o/gh"},"signals":{"installs":5}},
+ {"kind":"skill","id":"o/r@s","source":"o/r","skill":"s","signals":{"installs":9}},
+ {"kind":"plugin","id":"f@m","source":"./p","signals":{"installs":7}},
+ {"kind":"watch","id":"x/none","source":"x/none","signals":{"stars":30}}]')"
+assert_json_eq "$(jq -c '.[0].signals' <<<"$out")" \
+  '{"installs":5,"stars":12,"contributors":1,"created_at":"2026-10-03","pushed_at":"2026-10-07","owner":"user"}' \
+  "リポジトリのスター数・コントリビューター数・作成日・最終 push・持ち主の種別を signals に足す"
+assert_json_eq "$(jq -c '.[1].signals' <<<"$out")" \
+  '{"installs":9,"stars":3000,"contributors":"100+","created_at":"2025-01-01","pushed_at":"2026-10-20","owner":"org","archived":true}' \
+  "コントリビューターは 100 人までしか数えない。アーカイブ済みなら示す"
+assert_json_eq "$(jq -c '[.[2].signals, .[3].signals]' <<<"$out")" '[{"installs":7},{"stars":30}]' \
+  "リポジトリが分からない・情報が取れないものはそのまま"
+
 s_search() {
   t_remote; t_clone A
   t_machine A
@@ -83,5 +113,43 @@ s_search() {
   assert_eq "$rc" "2" "不明なサブコマンドは使い方の誤り"
   assert_contains "$(kit discover help)" "usage: kit discover" "使い方を表示する"
 }
+s_search_repo_signals() {
+  t_remote; t_clone A
+  t_machine A
+  echo '{"installed":[],"available":[{"pluginId":"ci@dir","name":"ci","description":"CI checks","marketplaceName":"dir","source":{"source":"git-subdir","url":"https://github.com/p/plugins","path":"ci"}}]}' \
+    >"${FAKE_DIR}/available.json"
+  mkdir -p "${FAKE_DIR}/skills" "${FAKE_DIR}/gh"
+  echo '{"skills":[{"id":"o/r/cr","source":"o/r","skillId":"cr","name":"cr","installs":9}]}' >"${FAKE_DIR}/skills/ci.json"
+  echo '{"items":[]}' >"${FAKE_DIR}/gh/search_code.json"
+  echo '{"stargazers_count":1,"created_at":"2026-10-03T10:06:42Z","pushed_at":"2026-10-07T14:57:03Z","archived":false,"owner":{"login":"p","type":"User"}}' \
+    >"${FAKE_DIR}/gh/repos_p_plugins.json"
+  echo '[{"login":"p","contributions":19}]' >"${FAKE_DIR}/gh/repos_p_plugins_contributors.json"
+  out="$(kit discover search "ci")"
+  assert_json_eq "$(jq -c '.[] | select(.id == "ci@dir") | .signals' <<<"$out")" \
+    '{"stars":1,"contributors":1,"created_at":"2026-10-03","pushed_at":"2026-10-07","owner":"user"}' "GitHub にある候補にリポジトリの情報を足す"
+  assert_json_eq "$(jq -c '.[] | select(.id == "o/r@cr") | .signals' <<<"$out")" '{"installs":9}' "リポジトリの情報が取れなければ元の目安のまま"
+  n="$(grep -c 'p/plugins' "${FAKE_DIR}/calls.log")"
+  assert_eq "$n" "2" "リポジトリとコントリビューターを 1 回ずつ取得する"
+  kit discover search "ci" >/dev/null
+  assert_eq "$(grep -c 'p/plugins' "${FAKE_DIR}/calls.log")" "$n" "24 時間はキャッシュを使う"
+}
+s_repo_signals_batches() {
+  t_machine A
+  kit_libs
+  KIT_GITHUB_PARALLEL=2
+  mkdir -p "${FAKE_DIR}/gh"
+  for r in a b c; do
+    echo '{"stargazers_count":7}' >"${FAKE_DIR}/gh/repos_o_${r}.json"
+    echo '[]' >"${FAKE_DIR}/gh/repos_o_${r}_contributors.json"
+  done
+  out="$(kit_add_repo_signals '[{"kind":"watch","id":"o/a"},{"kind":"watch","id":"o/b"},{"kind":"watch","id":"o/c"},
+    {"kind":"skill","id":"o/a@s","source":"o/a","skill":"s","signals":{"installs":1}}]')"
+  assert_json_eq "$(jq -c '[.[].signals]' <<<"$out")" \
+    '[{"stars":7,"contributors":0},{"stars":7,"contributors":0},{"stars":7,"contributors":0},{"installs":1,"stars":7,"contributors":0}]' \
+    "並列数を超える数のリポジトリもすべて取得する"
+  assert_eq "$(grep -c 'repos/o/a' "${FAKE_DIR}/calls.log")" "2" "同じリポジトリの候補が複数あっても 1 回だけ取得する"
+}
 t_scenario "kit discover search" s_search
+t_scenario "検索結果にリポジトリの情報を足す" s_search_repo_signals
+t_scenario "リポジトリの情報を並列に取得する" s_repo_signals_batches
 t_done

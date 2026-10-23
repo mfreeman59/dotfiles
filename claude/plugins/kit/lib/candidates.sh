@@ -7,9 +7,10 @@ kit_json_or() {
 }
 
 # kit_collect_candidates <needs の JSON 配列>: needs（[{theme, keywords, ...}]）ごとに §8.1 のソースを検索し、
-# 導入済み・却下済み・ウォッチ済みを除いた候補の JSON 配列を 1 行で出す。却下とウォッチは作業ツリーの manifest（W）から読む
+# 導入済み・却下済み・ウォッチ済みを除いた候補の JSON 配列を 1 行で出す。却下とウォッチは作業ツリーの manifest（W）から読む。
+# GitHub にある候補には、リポジトリの情報を信頼性の目安（signals）として足す
 kit_collect_candidates() {
-  local needs="$1" w watch dismissed installed wplugins='[]' skills='{}' github='{}' n theme q gh_n=0 catalog
+  local needs="$1" w watch dismissed installed wplugins='[]' skills='{}' github='{}' n theme q gh_n=0 catalog cands
   w="$(kit_working_manifest 2>/dev/null)"
   jq -e 'type == "object"' >/dev/null 2>&1 <<<"$w" || w="$KIT_EMPTY_MANIFEST"
   watch="$(jq -c '[.discovery.watch[]? | strings]' <<<"$w")"
@@ -26,8 +27,9 @@ kit_collect_candidates() {
     fi
   done < <(jq -c '.[]' <<<"$needs")
   catalog="$(kit_catalog_file)"
-  jq -nc --argjson needs "$needs" --argjson wp "$wplugins" --argjson s "$skills" --argjson g "$github" \
+  cands="$(jq -nc --argjson needs "$needs" --argjson wp "$wplugins" --argjson s "$skills" --argjson g "$github" \
     --argjson i "$installed" --argjson d "$dismissed" --argjson wt "$watch" \
     '{needs: $needs, watch_plugins: $wp, skills: $s, github: $g, installed: $i, dismissed: $d, watch: $wt}' |
-    jq -c -L "$KIT_LIB_DIR" --slurpfile c "$catalog" 'include "candidates"; .catalog = $c[0] | kit_collect'
+    jq -c -L "$KIT_LIB_DIR" --slurpfile c "$catalog" 'include "candidates"; .catalog = $c[0] | kit_collect')" || return 1
+  kit_add_repo_signals "$cands"
 }

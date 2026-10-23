@@ -120,6 +120,18 @@ s_bad_watch() {
   assert_eq "$rc" "0" "ウォッチ中のマーケットプレイスに形の崩れた項目があっても分析できる"
   assert_contains "$(jq -c '[.[].id]' "$(D candidates.json)")" '"good@wm"' "そのマーケットプレイスの他の候補も使う"
 }
+s_repo_signals() {
+  setup; prompts 3 2026-10-10
+  echo '{"installed":[],"available":[{"pluginId":"db@official","name":"db","description":"Supabase migrations","marketplaceName":"official","source":{"source":"url","url":"https://github.com/o/db.git"},"installCount":50}]}' \
+    >"${FAKE_DIR}/available.json"
+  echo '{"stargazers_count":40,"created_at":"2025-05-01T00:00:00Z","pushed_at":"2026-10-01T00:00:00Z","archived":false,"owner":{"login":"o","type":"Organization"}}' \
+    >"${FAKE_DIR}/gh/repos_o_db.json"
+  echo '[{"login":"a"},{"login":"b"}]' >"${FAKE_DIR}/gh/repos_o_db_contributors.json"
+  kit discover run
+  assert_json_eq "$(jq -c '.[0].signals' "$(D recommendations.json)")" \
+    '{"installs":50,"stars":40,"contributors":2,"created_at":"2025-05-01","pushed_at":"2026-10-01","owner":"org"}' "おすすめにリポジトリの情報を残す"
+  assert_contains "$(cat "${FAKE_DIR}/p-recommendations.prompt")" '"contributors":2' "順位付けにもリポジトリの情報を渡す"
+}
 s_defaults() {
   t_machine A
   kit_libs
@@ -133,5 +145,6 @@ t_scenario "同時に 1 つだけ分析する" s_lock
 t_scenario "分析の時期を判定する" s_maybe_run
 t_scenario "失敗から 1 日以内は再試行しない" s_retry
 t_scenario "形の崩れたウォッチ先があっても分析する" s_bad_watch
+t_scenario "おすすめにリポジトリの情報を足す" s_repo_signals
 t_scenario "既定値" s_defaults
 t_done

@@ -7,6 +7,7 @@ KIT_SKILLS_API="${KIT_SKILLS_API:-https://skills.sh}"
 KIT_HTTP_TIMEOUT="${KIT_HTTP_TIMEOUT:-15}"
 KIT_GITHUB_MIN_STARS="${KIT_GITHUB_MIN_STARS:-20}"
 KIT_GITHUB_MAX_AGE_DAYS="${KIT_GITHUB_MAX_AGE_DAYS:-180}"
+KIT_GITHUB_PARALLEL="${KIT_GITHUB_PARALLEL:-8}"
 
 # kit_cache_fresh <path>: ファイルが空でなく、KIT_CACHE_SECONDS より新しければ 0
 kit_cache_fresh() {
@@ -71,17 +72,59 @@ kit_watch_marketplace() {
   kit_read_json "$f" '{}'
 }
 
-# kit_repo_info <owner/repo>: スター数・最終 push・アーカイブ済みか・説明（24 時間キャッシュ）
+# kit_repo_info <owner/repo>: スター数・作成日・最終 push・アーカイブ済みか・説明・持ち主の種別（24 時間キャッシュ）
 kit_repo_info() {
   local f out
   f="$(kit_watch_cache_path "$1" .repo.json)"
   if ! kit_cache_fresh "$f"; then
     if out="$(gh api "repos/$1" </dev/null 2>/dev/null)" &&
       jq -e '(.stargazers_count | type) == "number"' >/dev/null 2>&1 <<<"$out"; then
-      kit_write_json "$f" "$(jq -c '{stargazers_count, pushed_at, archived, description}' <<<"$out")"
+      kit_write_json "$f" "$(jq -c '{stargazers_count, created_at, pushed_at, archived, description, owner_type: .owner.type?}' <<<"$out")"
     fi
   fi
   kit_read_json "$f" '{}'
+}
+
+# kit_repo_contributors <owner/repo>: コントリビューターの数（1 ページの 100 人まで数える。24 時間キャッシュ）
+kit_repo_contributors() {
+  local f out
+  f="$(kit_watch_cache_path "$1" .contributors.json)"
+  if ! kit_cache_fresh "$f"; then
+    if out="$(gh api -X GET "repos/$1/contributors" -f per_page=100 </dev/null 2>/dev/null)" &&
+      jq -e 'type == "array"' >/dev/null 2>&1 <<<"$out"; then
+      kit_write_json "$f" "$(jq -c '{count: length}' <<<"$out")"
+    fi
+  fi
+  kit_read_json "$f" '{}'
+}
+
+# kit_add_repo_signals <候補の JSON 配列>: GitHub にある候補の signals に、リポジトリの情報を足す（kit_with_repo_signals）。
+# 候補は最大 60 件あるので、リポジトリごとに 1 回だけ、KIT_GITHUB_PARALLEL 件ずつ並列に取得してキャッシュに入れてから読む。
+# gh がない・取得に失敗したものは元の signals のまま
+kit_add_repo_signals() {
+  local repos r pids="" n=0 acc='{}'
+  kit_require gh || { printf '%s' "$1"; return 0; }
+  repos="$(jq -r -L "$KIT_LIB_DIR" 'include "candidates"; [.[] | kit_candidate_repo | strings] | unique | .[]' <<<"$1" 2>/dev/null)"
+  while IFS= read -r r; do
+    kit_valid_repo "$r" || continue
+    (kit_repo_info "$r" >/dev/null; kit_repo_contributors "$r" >/dev/null) &
+    pids="${pids} $!"
+    n=$((n + 1))
+    if [ "$n" -ge "$KIT_GITHUB_PARALLEL" ]; then
+      wait $pids
+      pids="" n=0
+    fi
+  done <<<"$repos"
+  [ -n "$pids" ] && wait $pids
+  # 取得に失敗したリポジトリをここで取り直さないよう、キャッシュを直接読む
+  while IFS= read -r r; do
+    kit_valid_repo "$r" || continue
+    acc="$(jq -c --arg r "$r" --argjson i "$(kit_read_json "$(kit_watch_cache_path "$r" .repo.json)" '{}')" \
+      --argjson c "$(kit_read_json "$(kit_watch_cache_path "$r" .contributors.json)" '{}')" \
+      '.[$r] = {info: $i, contributors: $c}' <<<"$acc")"
+  done <<<"$repos"
+  jq -c -L "$KIT_LIB_DIR" --argjson repos "$acc" 'include "candidates"; kit_with_repo_signals($repos)' <<<"$1" 2>/dev/null ||
+    printf '%s' "$1"
 }
 
 # kit_valid_repo <s>: GitHub の owner/repo の形なら 0。パスとして悪用できる「.」「..」は認めない

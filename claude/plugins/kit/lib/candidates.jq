@@ -61,6 +61,36 @@ def kit_collect:
   | kit_dedupe
   | .[0:60];
 
+# 候補の GitHub リポジトリ（owner/repo）。マーケットプレイスの中の相対パスのプラグインは、ウォッチリスト由来ならその
+# マーケットプレイスのリポジトリ。GitHub 以外の取得元や、どのリポジトリにあるか分からないもの、形の崩れたものは null
+def kit_candidate_repo:
+  (if .kind == "watch" then .id
+   elif .kind == "skill" then .source
+   elif .kind == "plugin" then
+     ((.source | if type != "object" then empty
+                 elif .source == "github" then .repo
+                 elif .source == "url" or .source == "git-subdir" then
+                   ((.url // "") | tostring | capture("^https://github\\.com/(?<r>[^/]+/[^/]+?)(\\.git)?/?$") | .r)
+                 else empty end)
+      // .marketplace_source)
+   else null end)
+  | if type == "string" and test("^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$") then . else null end;
+
+# 候補の signals に、リポジトリの情報（$repos: {<owner/repo>: {info: kit_repo_info の出力, contributors: {count}}}）を足す。
+# コントリビューターは 100 人までしか数えないので、100 なら "100+"。値のないものは足さない
+def kit_with_repo_signals($repos):
+  map((kit_candidate_repo) as $r
+      | if $r != null and $repos[$r] != null then
+          .signals = ((.signals // {}) + ($repos[$r] | {
+              stars: ((.info.stargazers_count | numbers) // null),
+              contributors: ((.contributors.count | numbers | if . >= 100 then "100+" else . end) // null),
+              created_at: ((.info.created_at | strings | .[0:10]) // null),
+              pushed_at: ((.info.pushed_at | strings | .[0:10]) // null),
+              owner: ((.info.owner_type | strings | if . == "Organization" then "org" else "user" end) // null),
+              archived: (if .info.archived == true then true else null end)}
+            | with_entries(select(.value != null))))
+        else . end);
+
 # ④ の出力を検証して整える。候補にない id は捨てる（モデルの作り話や、説明文に仕込まれた指示で一覧にない導入元へ
 # 誘導されるのを防ぐ）。種別・導入元・信頼性の目安は候補の値を使い、モデルからは need・reason・overlap だけを採る。最大 5 件
 def kit_recommendations($cands):
