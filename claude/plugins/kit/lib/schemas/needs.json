@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "properties": {
+    "needs": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "theme": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+          "keywords": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 4 }
+        },
+        "required": ["theme", "evidence", "keywords"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["needs"],
+  "additionalProperties": false
+}

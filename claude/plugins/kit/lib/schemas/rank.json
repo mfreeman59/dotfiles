@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "recommendations": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "need": { "type": "string" },
+          "reason": { "type": "string" },
+          "overlap": { "type": "string" }
+        },
+        "required": ["id", "need", "reason", "overlap"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["recommendations"],
+  "additionalProperties": false
+}

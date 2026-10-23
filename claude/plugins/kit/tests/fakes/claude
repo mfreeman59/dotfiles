@@ -4,10 +4,32 @@
 set -uo pipefail
 state="${FAKE_DIR}/claude.json"
 echo "claude $*" >>"${FAKE_DIR}/calls.log"
-[ -n "${FAKE_SLOW:-}" ] && sleep "$FAKE_SLOW"
+# sleep の入出力を閉じておく（時間切れで親が止められても、コマンド置換が sleep の終わりを待たないように）
+[ -n "${FAKE_SLOW:-}" ] && sleep "$FAKE_SLOW" </dev/null >/dev/null 2>&1
 [ "${FAKE_BROKEN:-}" = 1 ] && { echo "fake failure" >&2; exit 1; }
 upd() { local tmp; tmp="$(mktemp)"; jq "$@" "$state" >"$tmp" && mv "$tmp" "$state"; }
 in_list() { jq -e --arg x "$2" --arg l "$1" '.[$l] | index($x) != null' "$state" >/dev/null; }
+
+# 偽の claude -p: --json-schema の required[0]（needs か recommendations）を名前にして応答を選ぶ。
+# $FAKE_DIR/p-<名前>.json があれば構造化出力として返し、なければ is_error を返す。p-<名前>.fail があれば終了コード 1。
+# 受け取ったプロンプトを p-<名前>.prompt に、作業ディレクトリと KIT_NESTED を p-<名前>.env に記録する
+if [ "${1:-}" = -p ]; then
+  schema="" prev=""
+  for a in "$@"; do
+    [ "$prev" = --json-schema ] && schema="$a"
+    prev="$a"
+  done
+  kind="$(jq -r '.required[0]' <<<"$schema")"
+  cat >"${FAKE_DIR}/p-${kind}.prompt"
+  printf 'cwd=%s nested=%s\n' "$PWD" "${KIT_NESTED:-}" >"${FAKE_DIR}/p-${kind}.env"
+  [ -f "${FAKE_DIR}/p-${kind}.fail" ] && exit 1
+  if [ -f "${FAKE_DIR}/p-${kind}.json" ]; then
+    jq -c '{type: "result", subtype: "success", is_error: false, structured_output: .}' "${FAKE_DIR}/p-${kind}.json"
+  else
+    echo '{"type":"result","subtype":"error_max_budget_usd","is_error":true}'
+  fi
+  exit 0
+fi
 
 [ "${1:-}" = plugin ] || exit 2
 shift
