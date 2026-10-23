@@ -28,6 +28,9 @@ kit_discover() {
     search) kit_discover_search "$@" ;;
     run) kit_discover_run ;;
     maybe-run) kit_discover_maybe_run ;;
+    list) kit_discover_list "$@" ;;
+    adopt) kit_discover_adopt "$@" ;;
+    dismiss) kit_discover_dismiss "$@" ;;
     -h | --help | help) kit_discover_usage ;;
     *) kit_discover_usage >&2; return 2 ;;
   esac
@@ -120,4 +123,183 @@ kit_discover_pending_notice() {
   [ "$(cat "${KIT_DISCOVER_DIR}/last-notified" 2>/dev/null)" = "$today" ] && return 0
   printf '%s\n' "$today" >"${KIT_DISCOVER_DIR}/last-notified"
   printf '🔎 おすすめ %s 件 — /kit:discover で確認' "$n"
+}
+
+# kit_discover_find <N か id>: おすすめ（N は rank）、おすすめの id、直前の検索結果（search.json）の id の順に探し、候補を 1 件出す
+kit_discover_find() {
+  local recs search
+  recs="$(kit_read_json "${KIT_DISCOVER_DIR}/recommendations.json" '[]')"
+  search="$(kit_read_json "${KIT_DISCOVER_DIR}/search.json" '[]')"
+  jq -ec --arg k "$1" --argjson s "$search" '
+    first((if ($k | test("^[0-9]+$")) then (.[] | select(.rank == ($k | tonumber))) else empty end),
+          (.[] | select(.id == $k)),
+          ($s[] | select(.id == $k)))' <<<"$recs" 2>/dev/null
+}
+
+# kit_discover_forget <id>: おすすめと直前の検索結果からその候補を外す（全件なくなれば「未処理のおすすめ」もなくなる）
+kit_discover_forget() {
+  local f
+  for f in recommendations.json search.json; do
+    [ -f "${KIT_DISCOVER_DIR}/${f}" ] || continue
+    kit_write_json "${KIT_DISCOVER_DIR}/${f}" \
+      "$(kit_read_json "${KIT_DISCOVER_DIR}/${f}" '[]' | jq -c --arg id "$1" 'map(select(.id != $id))')"
+  done
+}
+
+# kit_manifest_edit <arg-json> <jq-filter>: 作業ツリーの manifest（W）を、$x に arg-json を束縛したフィルタで書き換える。
+# W が読めない・壊れているなら何も書かずに 1（壊れたファイルを空の manifest で上書きすると、全マシンの discovery が消える）
+kit_manifest_edit() {
+  local w out
+  if [ -z "$KIT_DOTFILES" ] || [ ! -e "${KIT_DOTFILES}/.git" ]; then
+    echo "kit: dotfiles リポジトリが見つかりません" >&2
+    return 1
+  fi
+  if ! w="$(kit_working_manifest 2>/dev/null)" || ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$w"; then
+    echo "kit: claude/manifest.json を読めません（衝突マーカーなどを直してください）" >&2
+    return 1
+  fi
+  if ! out="$(jq -c --argjson x "$1" "$2" <<<"$w")" || ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$out"; then
+    echo "kit: manifest を更新できませんでした" >&2
+    return 1
+  fi
+  kit_write_json "$KIT_MANIFEST" "$out"
+}
+
+# kit_discover_sync: 導入・却下・ウォッチの編集の後の同期。失敗しても編集は作業ツリーに残り、次の同期で反映される
+kit_discover_sync() {
+  kit_sync || echo "kit: 同期できませんでした。次のセッションの開始時に同期します（kit status で確認できます）" >&2
+  return 0
+}
+
+# kit discover list [--json]（設計書 §8.5 の 1）
+kit_discover_list() {
+  local recs
+  recs="$(kit_read_json "${KIT_DISCOVER_DIR}/recommendations.json" '[]')"
+  if [ "${1:-}" = --json ]; then
+    printf '%s\n' "$recs"
+    return 0
+  fi
+  if [ "$(jq length <<<"$recs")" -eq 0 ]; then
+    echo "未処理のおすすめはありません"
+    return 0
+  fi
+  jq -r -L "$KIT_LIB_DIR" 'include "candidates"; .[] |
+    "\(.rank). [\(.kind)] \(.name)（\(.id)）",
+    "   出どころ: \(kit_source_label)",
+    "   理由: \(.reason)",
+    (if (.overlap // "") != "" then "   既存との重なり: \(.overlap)" else empty end),
+    "   目安: \((.signals // {}) | to_entries | map("\(.key)=\(.value)") | join(" ") | if . == "" then "なし" else . end)"' <<<"$recs"
+  echo "前回の分析: $(cat "${KIT_DISCOVER_DIR}/last-run" 2>/dev/null || echo まだありません)"
+}
+
+# kit discover dismiss <N か id> [--reason <text>]（設計書 §8.5 の 3）。おすすめにない id もそのまま却下できる
+kit_discover_dismiss() {
+  local key="${1:-}" reason="" c id usage="usage: kit discover dismiss <N か id> [--reason <text>]"
+  [ -n "$key" ] || { echo "$usage" >&2; return 2; }
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift ;;
+      *) echo "$usage" >&2; return 2 ;;
+    esac
+    shift
+  done
+  if c="$(kit_discover_find "$key")"; then
+    id="$(jq -r .id <<<"$c")"
+  else
+    case "$key" in
+      *[!0-9]*) id="$key" ;;
+      *) echo "kit: おすすめ ${key} が見つかりません" >&2; return 1 ;;
+    esac
+  fi
+  kit_manifest_edit "$(jq -nc --arg id "$id" --arg at "$(date +%Y-%m-%d)" --arg r "$reason" '{id: $id, at: $at, reason: $r}')" \
+    '.discovery.dismissed = ((((.discovery.dismissed // []) | map(select(.id != $x.id))) + [$x]) | sort_by(.id))' || return 1
+  kit_discover_forget "$id"
+  echo "却下しました: ${id}"
+  kit_discover_sync
+}
+
+# kit discover adopt <N か id> [--accept-command <sha256>]（設計書 §8.6）。導入したらおすすめから外し、kit sync で manifest に記録する
+kit_discover_adopt() {
+  local key="${1:-}" accept="" c kind id usage="usage: kit discover adopt <N か id> [--accept-command <sha256>]"
+  [ -n "$key" ] || { echo "$usage" >&2; return 2; }
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --accept-command)
+        accept="${2:-}"
+        [ -n "$accept" ] || { echo "$usage" >&2; return 2; }
+        shift ;;
+      *) echo "$usage" >&2; return 2 ;;
+    esac
+    shift
+  done
+  c="$(kit_discover_find "$key")" || {
+    echo "kit: 候補 ${key} が見つかりません（kit discover list か kit discover search で確かめてください）" >&2
+    return 1
+  }
+  kind="$(jq -r .kind <<<"$c")"
+  id="$(jq -r .id <<<"$c")"
+  case "$kind" in
+    plugin) kit_discover_install_plugin "$c" "$accept" || return 1 ;;
+    skill)
+      kit_require npx || { echo "kit: npx が必要です" >&2; return 1; }
+      npx --yes skills add "$(jq -r .source <<<"$c")" -s "$(jq -r .skill <<<"$c")" -g -y -a claude-code </dev/null >/dev/null 2>&1 || {
+        echo "kit: スキル ${id} の導入に失敗しました" >&2
+        return 1
+      } ;;
+    watch) kit_watch_edit add "$id" || return 1 ;;
+    *) echo "kit: 未知の種別です: ${kind}" >&2; return 1 ;;
+  esac
+  kit_discover_forget "$id"
+  echo "導入しました: ${id}"
+  kit_discover_sync
+}
+
+# kit_discover_install_plugin <candidate> <accept-sha>: プラグインを入れる。未登録のマーケットプレイス（ウォッチリスト由来）のものは
+# --marketplace でマーケットプレイスごと登録する。インストール時にコマンドを実行するもの（shownCommand）は、内容と承認の方法を見せて止める
+kit_discover_install_plugin() {
+  local c="$1" accept="$2" id name mkt msrc out rc
+  id="$(jq -r .id <<<"$c")"
+  name="$(jq -r .name <<<"$c")"
+  mkt="$(jq -r '.marketplace // ""' <<<"$c")"
+  msrc="$(jq -r '.marketplace_source // ""' <<<"$c")"
+  if [ -n "$msrc" ] && ! kit_claude plugin marketplace list --json </dev/null 2>/dev/null |
+    jq -e --arg m "$mkt" 'any(.[]?; .name == $m)' >/dev/null 2>&1; then
+    set -- plugin install "$name" --marketplace "$msrc" -s user --json
+  else
+    set -- plugin install "$id" -s user --json
+  fi
+  [ -n "$accept" ] && set -- "$@" --accept-command "$accept"
+  out="$(kit_claude "$@" </dev/null 2>/dev/null)"
+  rc=$?
+  if jq -e '.shownCommand' >/dev/null 2>&1 <<<"$out"; then
+    jq -r --arg id "$id" '"\($id) はインストール時に次のコマンドを実行します:", "  \(.shownCommand.command)",
+      "内容を確認して問題がなければ、kit discover adopt \($id) --accept-command \(.shownCommand.sha256) を実行してください"' <<<"$out"
+    return 1
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "kit: プラグイン ${id} の導入に失敗しました（$(jq -r '.message // "理由不明"' <<<"$out" 2>/dev/null)）" >&2
+    return 1
+  fi
+}
+
+# kit_watch_edit <add|remove> <owner/repo>: 作業ツリーの manifest の discovery.watch を編集する
+kit_watch_edit() {
+  if [ "$1" = add ]; then
+    kit_manifest_edit "$(jq -nc --arg r "$2" '$r')" '.discovery.watch = (((.discovery.watch // []) + [$x]) | unique)'
+  else
+    kit_manifest_edit "$(jq -nc --arg r "$2" '$r')" '.discovery.watch = ((.discovery.watch // []) | map(select(. != $x)))'
+  fi
+}
+
+# kit watch add|remove <owner/repo>（設計書 §9）
+kit_watch() {
+  local op="${1:-}" repo="${2:-}" usage="usage: kit watch add|remove <owner/repo>"
+  case "$op" in add | remove) ;; *) echo "$usage" >&2; return 2 ;; esac
+  kit_valid_repo "$repo" || { echo "$usage" >&2; return 2; }
+  kit_require jq || { echo "kit: jq が必要です" >&2; return 1; }
+  kit_watch_edit "$op" "$repo" || return 1
+  if [ "$op" = add ]; then echo "ウォッチリストに加えました: ${repo}"; else echo "ウォッチリストから外しました: ${repo}"; fi
+  kit_discover_sync
 }

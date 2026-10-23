@@ -17,6 +17,7 @@ usage: kit <command>
                                                        manifest とこのマシンを同期する
   status                                               同期の状態と次の同期の計画を表示する
   discover <command>                                   スキル・プラグインの発見（kit discover help）
+  watch add|remove <owner/repo>                        発見のウォッチリスト（discovery.watch）を編集する
   hook session-start|session-end                       Claude Code のフック用
 EOF
 }
@@ -25,6 +26,7 @@ case "${1:-}" in
   sync) shift; kit_sync "$@" ;;
   status) kit_status ;;
   discover) shift; kit_discover "$@" ;;
+  watch) shift; kit_watch "$@" ;;
   hook) shift; kit_hook "$@"; exit 0 ;;
   -h | --help | help) kit_usage ;;
   *) kit_usage >&2; exit 2 ;;

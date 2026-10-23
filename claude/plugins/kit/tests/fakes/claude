@@ -52,8 +52,22 @@ case "${1:-} ${2:-}" in
     # 本物の CLI と同じく、そのマーケットプレイスのプラグインも（スコープを問わず）消える
     upd --arg n "$3" '.marketplaces |= map(select(.name != $n)) | .plugins |= map(select(.id | endswith("@" + $n) | not))' ;;
   install*)
-    id="$2"
-    if in_list command_source "$id"; then
+    id="$2" mkt="" accept=""
+    shift 2
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --marketplace) mkt="$2"; shift ;;
+        --accept-command) accept="$2"; shift ;;
+      esac
+      shift
+    done
+    if [ -n "$mkt" ]; then
+      # 本物の CLI と同じく、--marketplace のマーケットプレイスをユーザー設定に登録してから入れる
+      name="${FAKE_MKT_NAME:-${mkt##*/}}"
+      upd --arg n "$name" --arg r "$mkt" '.marketplaces |= (map(select(.name != $n)) + [{name: $n, source: "github", repo: $r}])'
+      id="${id}@${name}"
+    fi
+    if in_list command_source "$id" && [ "$accept" != abc ]; then
       printf '{"command":"install","outcome":"failed","plugin":"%s","shownCommand":{"command":"make","sha256":"abc"}}\n' "$id"
       exit 1
     fi
