@@ -11,10 +11,12 @@ s_notices() {
   t_remote; t_clone A
   (t_machine A; . "${KIT_PLUGIN_DIR}/lib/common.sh"; kit_notice info "テスト通知1"; kit_notice warn "テスト通知2")
   out="$(on A kit hook session-start </dev/null)"
-  assert_contains "$(jq -r .systemMessage <<<"$out")" "テスト通知1" "通知をユーザーに見せる"
-  assert_contains "$(jq -r .systemMessage <<<"$out")" "テスト通知2" "全部の通知を見せる"
+  ctx="$(jq -r .hookSpecificOutput.additionalContext <<<"$out")"
+  assert_contains "$ctx" "テスト通知1" "通知を Claude に渡す"
+  assert_contains "$ctx" "テスト通知2" "全部の通知を渡す"
+  assert_contains "$ctx" "最初の応答の冒頭で" "ユーザーに伝えるよう Claude に頼む"
   assert_eq "$(jq -r .hookSpecificOutput.hookEventName <<<"$out")" "SessionStart" "SessionStart の形"
-  assert_contains "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "テスト通知1" "Claude にも伝える"
+  assert_eq "$(jq -r 'has("systemMessage")' <<<"$out")" "false" "SessionStart では表示されない systemMessage は使わない"
   wait_log A "sync: done"; assert_eq "$?" "0" "切り離した同期が最後まで動く"
   assert_eq "$(on A kit hook session-start </dev/null)" "" "通知を出したら空になる"
   wait_log A "sync: done" 2
