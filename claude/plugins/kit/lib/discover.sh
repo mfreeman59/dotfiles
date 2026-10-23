@@ -122,11 +122,29 @@ kit_discover_analyze() {
   kit_log "discover: done (needs=$(jq length <<<"$needs") candidates=$(jq length <<<"$cands") recommendations=$(jq length <<<"$recs"))"
 }
 
+# kit_discover_pending: 未処理のおすすめ（JSON 配列）。おすすめの一覧はマシンごとなので、他のマシンで却下・導入・ウォッチして
+# 同期で作業ツリーの manifest に届いたものを除く（ファイルを読むだけなので、フックからも呼べる）
+kit_discover_pending() {
+  local m
+  m="$(kit_read_json "$KIT_MANIFEST" '{}')"
+  kit_read_json "${KIT_DISCOVER_DIR}/recommendations.json" '[]' | jq -c --argjson m "$m" '
+    ($m | if type == "object" then . else {} end) as $m
+    | [$m.discovery.dismissed[]?.id? | strings] as $d
+    | [$m.discovery.watch[]? | strings] as $w
+    | (($m.plugins // {}) | if type == "object" then keys else [] end) as $p
+    | (($m.skills // {}) | if type == "object" then keys else [] end) as $s
+    | map(select((.id | IN($d[]) | not)
+                 and (if .kind == "plugin" then (.id | IN($p[]) | not)
+                      elif .kind == "skill" then (.skill | IN($s[]) | not)
+                      elif .kind == "watch" then (.id | IN($w[]) | not)
+                      else true end)))' 2>/dev/null || printf '[]'
+}
+
 # kit_discover_pending_notice: 未処理のおすすめがあり、今日まだ伝えていなければ通知文を出し、今日の日付を記録する
 # （設計書 §8.4。並列セッションでうるさくならないよう 1 日 1 回）
 kit_discover_pending_notice() {
   local n today
-  n="$(kit_read_json "${KIT_DISCOVER_DIR}/recommendations.json" '[]' | jq 'length')"
+  n="$(kit_discover_pending | jq 'length')"
   [ "${n:-0}" -gt 0 ] || return 0
   today="$(date +%Y-%m-%d)"
   [ "$(cat "${KIT_DISCOVER_DIR}/last-notified" 2>/dev/null)" = "$today" ] && return 0
@@ -202,7 +220,7 @@ kit_discover_sync() {
 # kit discover list [--json]（設計書 §8.5 の 1）
 kit_discover_list() {
   local recs
-  recs="$(kit_read_json "${KIT_DISCOVER_DIR}/recommendations.json" '[]')"
+  recs="$(kit_discover_pending)"
   if [ "${1:-}" = --json ]; then
     printf '%s\n' "$recs"
     return 0

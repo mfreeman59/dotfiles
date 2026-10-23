@@ -17,7 +17,7 @@ kit_status() {
   kit_claude plugin marketplace list --json </dev/null 2>/dev/null |
     jq -r '.[]? | select(.name != "dotfiles" and (.source == "directory" or .source == "file"))
       | "管理対象外: マーケットプレイス \(.name)（ローカルパスのため同期しません）"' 2>/dev/null
-  n="$(kit_read_json "${KIT_STATE}/discover/recommendations.json" '[]' | jq 'length')"
+  n="$(kit_discover_pending | jq 'length')"
   if [ "${n:-0}" -gt 0 ]; then echo "未処理のおすすめ: ${n} 件（/kit:discover で確認）"; else echo "未処理のおすすめ: 0 件"; fi
   echo "前回の発見の分析: $(cat "${KIT_STATE}/discover/last-run" 2>/dev/null || echo まだありません)"
   echo "--- 同期の計画（kit sync --dry-run）"

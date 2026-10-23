@@ -84,6 +84,19 @@ s_dismiss_during_sync() {
   assert_eq "$rc" "1" "同期が終わらなければ却下しない"
   assert_eq "$(jq -c '[.discovery.dismissed[]?.id]' "$(W)")" '["db@official"]' "ロックを取れないまま manifest を書かない"
 }
+s_other_machine() {
+  setup
+  # 他のマシンで db を却下し、cr を導入した結果が、同期でこのマシンの manifest に届いた
+  mkdir -p "$(dirname "$(W)")"
+  echo '{"version":1,"marketplaces":{},"plugins":{},"skills":{"cr":{"source":"o/r"}},
+    "discovery":{"watch":[],"dismissed":[{"id":"db@official","at":"2026-10-20","reason":""}]}}' >"$(W)"
+  assert_eq "$(kit discover list --json | jq -c '[.[].id]')" '["wp@wmk","g/db"]' "他のマシンで却下・導入したものを一覧に出さない"
+  assert_not_contains "$(kit discover list)" "db@official" "表示の一覧にも出さない"
+  assert_contains "$(kit status)" "未処理のおすすめ: 2 件" "件数にも数えない"
+  out="$(kit hook session-start </dev/null)"
+  assert_contains "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "おすすめ 2 件" "セッション開始時の通知の件数にも数えない"
+  wait_log A "discover: skip"
+}
 s_watch() {
   setup
   out="$(kit watch add o/new)"; rc=$?
@@ -178,6 +191,7 @@ t_scenario "一覧" s_list
 t_scenario "却下" s_dismiss
 t_scenario "manifest が壊れていたら却下しない" s_broken_manifest
 t_scenario "同期の実行中に却下しても失わない" s_dismiss_during_sync
+t_scenario "他のマシンで処理したおすすめを出さない" s_other_machine
 t_scenario "ウォッチリスト" s_watch
 t_scenario "プラグインを入れる" s_adopt_plugin
 t_scenario "未登録のマーケットプレイスのプラグインを入れる" s_adopt_unregistered
