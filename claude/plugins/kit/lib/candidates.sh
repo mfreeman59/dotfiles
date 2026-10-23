@@ -1,5 +1,11 @@
 # 発見の ③ 候補収集（設計書 §8.2）。
 
+# kit_json_or <default> <json>: json が default と同じ型の JSON ならそれを、そうでなければ default を出す
+# （1 つのソースの異常な出力で、候補収集の全体を止めない）
+kit_json_or() {
+  if jq -e --argjson d "$1" 'type == ($d | type)' >/dev/null 2>&1 <<<"${2:-null}"; then printf '%s' "$2"; else printf '%s' "$1"; fi
+}
+
 # kit_collect_candidates <needs の JSON 配列>: needs（[{theme, keywords, ...}]）ごとに §8.1 のソースを検索し、
 # 導入済み・却下済み・ウォッチ済みを除いた候補の JSON 配列を 1 行で出す。却下とウォッチは作業ツリーの manifest（W）から読む
 kit_collect_candidates() {
@@ -8,14 +14,14 @@ kit_collect_candidates() {
   jq -e 'type == "object"' >/dev/null 2>&1 <<<"$w" || w="$KIT_EMPTY_MANIFEST"
   watch="$(jq -c '[.discovery.watch[]? | strings]' <<<"$w")"
   dismissed="$(jq -c '[.discovery.dismissed[]? | objects]' <<<"$w")"
-  installed="$(kit_installed)"
-  kit_require gh && wplugins="$(kit_watch_candidates "$watch")"
+  installed="$(kit_json_or '{}' "$(kit_installed)")"
+  kit_require gh && wplugins="$(kit_json_or '[]' "$(kit_watch_candidates "$watch")")"
   while IFS= read -r n; do
     theme="$(jq -r .theme <<<"$n")"
     q="$(jq -r '.keywords | join(" ")' <<<"$n")"
-    skills="$(jq -c --arg t "$theme" --argjson r "$(kit_skills_search "$q" 5)" '.[$t] = $r' <<<"$skills")"
+    skills="$(jq -c --arg t "$theme" --argjson r "$(kit_json_or '[]' "$(kit_skills_search "$q" 5)")" '.[$t] = $r' <<<"$skills")"
     if kit_require gh && [ "$gh_n" -lt 5 ]; then
-      github="$(jq -c --arg t "$theme" --argjson r "$(kit_github_search "$q")" '.[$t] = $r' <<<"$github")"
+      github="$(jq -c --arg t "$theme" --argjson r "$(kit_json_or '[]' "$(kit_github_search "$q")")" '.[$t] = $r' <<<"$github")"
       gh_n=$((gh_n + 1))
     fi
   done < <(jq -c '.[]' <<<"$needs")

@@ -41,6 +41,11 @@ kit_watch_candidates '["o/w"]' >/dev/null
 assert_eq "$(grep -c 'contents/.claude-plugin' "${FAKE_DIR}/calls.log")" "1" "24 時間以内はキャッシュを使う"
 assert_eq "$(kit_watch_candidates '["o/none"]')" "[]" "取得できなければ空"
 assert_eq "$([ -e "${KIT_STATE_DIR}/discover/watch-cache/o_none.json" ] && echo yes || echo no)" "no" "エラーの応答をキャッシュしない"
+echo '{"name":"wm2","plugins":["str",{"name":"bad","description":{"en":"x"},"source":"./bad"},{"name":"good","description":"ok","source":"./good"}]}' \
+  >"${FAKE_DIR}/gh/repos_o_w2_contents_.claude-plugin_marketplace.json.json"
+echo '{"name":{"x":1},"plugins":[{"name":"p","source":"./p"}]}' >"${FAKE_DIR}/gh/repos_o_w3_contents_.claude-plugin_marketplace.json.json"
+assert_eq "$(kit_watch_candidates '["o/w2","o/w3","o/w"]' | jq -c '[.[] | [.id, .description]]')" '[["bad@wm2",""],["good@wm2","ok"],["p1@wmk","Postgres helper"]]' \
+  "形の崩れた項目やマーケットプレイスがあっても、他の候補は出す"
 
 # GitHub 全体
 recent="$(date -u -v-10d +%Y-%m-%dT%H:%M:%SZ)"
@@ -56,6 +61,9 @@ assert_eq "$(jq -c '[.[].id]' <<<"$out")" '["g/good"]' "スター 20 以上・18
 assert_eq "$(jq -r '.[0] | "\(.kind) \(.signals.stars) \(.signals.pushed_at) \(.description)"' <<<"$out")" "watch 30 ${recent:0:10} good" "ウォッチ候補として出す"
 assert_contains "$(fake_calls)" "gh api -X GET search/code -f q=filename:marketplace.json path:.claude-plugin code review -f per_page=10" "marketplace.json を持つリポジトリをコード検索する"
 assert_eq "$(export FAKE_GH_FAIL=1; kit_github_search "x")" "[]" "gh が失敗したら空"
+echo '{"items":[{"repository":{"full_name":"g/badtime"}},{"repository":{"full_name":"g/good"}}]}' >"${FAKE_DIR}/gh/search_code.json"
+echo '{"stargazers_count":99,"pushed_at":"yesterday","archived":false}' >"${FAKE_DIR}/gh/repos_g_badtime.json"
+assert_eq "$(kit_github_search "other" | jq -c '[.[].id]')" '["g/good"]' "形の崩れたリポジトリの情報があっても、他の候補は出す"
 
 # 導入済みのもの
 fake_set '.plugins = [{"id":"x@m","enabled":true},{"id":"y@m","enabled":false,"scope":"project"}] | .marketplaces = [{"name":"m","source":"github","repo":"o/m"}]'

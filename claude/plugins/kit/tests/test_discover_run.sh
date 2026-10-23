@@ -104,6 +104,16 @@ s_retry() {
   assert_eq "$?" "0" "1 日経てば再試行する"
   assert_eq "$(exists "$(D last-failed)")" "no" "成功したら失敗の記録を消す"
 }
+s_bad_watch() {
+  setup; prompts 3 2026-10-10
+  echo '{"version":1,"marketplaces":{},"plugins":{},"skills":{},"discovery":{"watch":["o/wm"],"dismissed":[]}}' >"${KIT_DOTFILES}/claude/manifest.json"
+  echo '{"name":"wm","plugins":[{"name":"good","description":"supabase helper","source":"./good"},{"name":"bad","description":{"en":"supabase"},"source":"./bad"},7]}' \
+    >"${FAKE_DIR}/gh/repos_o_wm_contents_.claude-plugin_marketplace.json.json"
+  echo '{"stargazers_count":5,"pushed_at":"2026-10-01T00:00:00Z","archived":false}' >"${FAKE_DIR}/gh/repos_o_wm.json"
+  kit discover run; rc=$?
+  assert_eq "$rc" "0" "ウォッチ中のマーケットプレイスに形の崩れた項目があっても分析できる"
+  assert_contains "$(jq -c '[.[].id]' "$(D candidates.json)")" '"good@wm"' "そのマーケットプレイスの他の候補も使う"
+}
 s_defaults() {
   t_machine A
   kit_libs
@@ -116,5 +126,6 @@ t_scenario "失敗" s_failure
 t_scenario "同時に 1 つだけ分析する" s_lock
 t_scenario "分析の時期を判定する" s_maybe_run
 t_scenario "失敗から 1 日以内は再試行しない" s_retry
+t_scenario "形の崩れたウォッチ先があっても分析する" s_bad_watch
 t_scenario "既定値" s_defaults
 t_done

@@ -92,19 +92,24 @@ kit_valid_repo() {
   return 0
 }
 
-# kit_watch_candidates <watch の JSON 配列>: ウォッチリストのマーケットプレイスにあるプラグイン → 候補
+# kit_watch_candidates <watch の JSON 配列>: ウォッチリストのマーケットプレイスにあるプラグイン → 候補。
+# marketplace.json は第三者が書くので、形の崩れた項目は飛ばし、1 つのリポジトリで失敗しても他のリポジトリの候補は残す
 kit_watch_candidates() {
-  local repo m info acc='[]'
+  local repo m info out acc='[]'
   while IFS= read -r repo; do
     kit_valid_repo "$repo" || continue
     m="$(kit_watch_marketplace "$repo")"
     info="$(kit_repo_info "$repo")"
-    acc="$(jq -c --argjson m "$m" --argjson i "$info" --arg repo "$repo" '
-      . + [($m.name // "") as $mk | select($mk != "") | $m.plugins[]? | select((.name | type) == "string")
-           | {kind: "plugin", id: "\(.name)@\($mk)", name, description: ((.description // "")[0:300]), source,
+    out="$(jq -c --argjson m "$m" --argjson i "$info" --arg repo "$repo" '
+      . + [($m.name // "") as $mk | select(($mk | type) == "string" and $mk != "") | $m.plugins[]? | objects
+           | select((.name | type) == "string")
+           | {kind: "plugin", id: "\(.name)@\($mk)", name,
+              description: (if (.description | type) == "string" then .description[0:300] else "" end), source,
               marketplace: $mk, marketplace_source: $repo, origin: "watch",
-              signals: ({stars: $i.stargazers_count, pushed_at: (($i.pushed_at // "")[0:10])}
-                        | with_entries(select(.value != null and .value != "")))}]' <<<"$acc")"
+              signals: ({stars: (($i.stargazers_count | numbers) // null),
+                         pushed_at: (($i.pushed_at | strings | .[0:10]) // null)}
+                        | with_entries(select(.value != null and .value != "")))}]' <<<"$acc" 2>/dev/null)" && acc="$out" ||
+      kit_log "discover: watch $repo has an unexpected marketplace.json"
   done < <(jq -r '.[]? | strings' <<<"$1")
   printf '%s' "$acc"
 }
@@ -112,7 +117,7 @@ kit_watch_candidates() {
 # kit_github_search <query>: GitHub 全体から .claude-plugin/marketplace.json を持つリポジトリを探す（1 クエリ、上位 5 リポジトリ）。
 # スターが KIT_GITHUB_MIN_STARS 以上、KIT_GITHUB_MAX_AGE_DAYS 日以内に push があり、アーカイブされていないものだけをウォッチ候補にする
 kit_github_search() {
-  local out r info cutoff acc='[]'
+  local out r info cutoff next acc='[]'
   out="$(gh api -X GET search/code -f q="filename:marketplace.json path:.claude-plugin $1" -f per_page=10 </dev/null 2>/dev/null)" || {
     kit_log "discover: github search failed: $1"
     printf '[]'
@@ -122,12 +127,13 @@ kit_github_search() {
   while IFS= read -r r; do
     kit_valid_repo "$r" || continue
     info="$(kit_repo_info "$r")"
-    acc="$(jq -c --argjson i "$info" --arg r "$r" --argjson min "$KIT_GITHUB_MIN_STARS" --argjson cutoff "$cutoff" '
+    # 形の崩れた情報（日時でない pushed_at など）のリポジトリは候補にせず、他のリポジトリの候補は残す
+    next="$(jq -c --argjson i "$info" --arg r "$r" --argjson min "$KIT_GITHUB_MIN_STARS" --argjson cutoff "$cutoff" '
       if ($i.stargazers_count // 0) >= $min and (($i.archived // false) | not)
-         and ((($i.pushed_at // "1970-01-01T00:00:00Z") | fromdateiso8601) >= $cutoff)
+         and ((try (($i.pushed_at // "1970-01-01T00:00:00Z") | fromdateiso8601) catch 0) >= $cutoff)
       then . + [{kind: "watch", id: $r, name: $r, description: ((($i.description // "") | tostring)[0:300]), source: $r,
                  origin: "github", signals: {stars: $i.stargazers_count, pushed_at: ($i.pushed_at[0:10])}}]
-      else . end' <<<"$acc")"
+      else . end' <<<"$acc" 2>/dev/null)" && acc="$next"
   done < <(jq -r '[.items[]?.repository.full_name | strings] | unique | .[0:5][]' <<<"$out" 2>/dev/null)
   printf '%s' "$acc"
 }
