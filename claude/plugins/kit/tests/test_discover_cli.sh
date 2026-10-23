@@ -94,7 +94,7 @@ s_other_machine() {
   assert_not_contains "$(kit discover list)" "db@official" "表示の一覧にも出さない"
   assert_contains "$(kit status)" "未処理のおすすめ: 2 件" "件数にも数えない"
   out="$(kit hook session-start </dev/null)"
-  assert_contains "$(jq -r .hookSpecificOutput.additionalContext <<<"$out")" "おすすめ 2 件" "セッション開始時の通知の件数にも数えない"
+  assert_contains "$(jq -r .systemMessage <<<"$out")" "おすすめ 2 件" "セッション開始時の通知の件数にも数えない"
   wait_log A "discover: skip"
 }
 s_watch() {

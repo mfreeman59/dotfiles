@@ -365,14 +365,13 @@ KIT_NESTED=1 claude -p \
 
 ```json
 {
-  "hookSpecificOutput": {
-    "hookEventName": "SessionStart",
-    "additionalContext": "kit からの通知です。最初の応答の冒頭で、次の内容をユーザーに一度だけ簡潔に伝えてください:\n・<通知文>"
-  }
+  "systemMessage": "kit:\n・<通知文>"
 }
 ```
 
-SessionStart フックの `systemMessage` は画面に表示されなかった（§13。2026-10-23 に実機で確認）。そのため、通知は Claude に渡し、最初の応答で伝えてもらう。Claude は同じ文面をもとに、/kit:discover などの話題にも応じられる。
+SessionStart フックの `systemMessage` は画面に表示される（§13）。通知は Claude には渡さない。応答に混ぜて言い換えさせず、コンテキストも使わず、`claude -p` を使うスクリプトの出力にも混ざらないようにするため。通知文は `/kit:discover` を案内するだけで、その手順はスキルが教える。
+
+通知はマシンで 1 つのキューなので、最初に起動（または再開）したセッションがまとめて受け取り、そのウィンドウに表示される。
 
 - `notices.jsonl` に溜まった通知はすべて表示して、空にする。同じ文面のものは 1 つにまとめる。
 - 警告（level が `warn`）は、同じ文面のものを 6 時間に 1 回までしか通知キューに入れない。master 以外のブランチで作業している間など、同期のたびに同じ警告が出続けるのを防ぐため。
@@ -477,7 +476,7 @@ SessionStart フックの `systemMessage` は画面に表示されなかった�
 
 | 確かめること | 期待どおりなら | 違ったら |
 |---|---|---|
-| SessionStart フックの `systemMessage` がユーザーに表示される | — | **確認済み（2026-10-23）: 表示されなかった。** `additionalContext` に「最初の応答の冒頭で、次の通知をユーザーに一度だけ伝える」という指示を入れて、Claude に伝えてもらう（§8.4） |
+| SessionStart フックの `systemMessage` がユーザーに表示される | — | **確認済み（2026-10-23）: 表示される。** 一度「表示されなかった」と判断して `additionalContext` で Claude に伝えてもらう方式に変えたが、実際には別のウィンドウで先に起動したセッションが通知を受け取って表示していた（§8.4）。`systemMessage` に戻した |
 | `claude plugin install <name>@anthropic-plugin-directory` がマーケットプレイスの追加なしで動く | **確認済み（2026-10-23）: 動いた。** マーケットプレイスの一覧にも追加されない（§8.6 のとおり） | — |
 | `claude -p --safe-mode --tools "" --json-schema ...` が、claude.ai のログインのまま構造化出力を返す | **確認済み（2026-10-23）: 返した。** 構造化出力は `--output-format json` の結果の `structured_output`（§8.2 のとおり） | — |
 

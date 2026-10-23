@@ -11,7 +11,8 @@ kit_hook() {
   return 0
 }
 
-# SessionStart の systemMessage は画面に表示されない（設計書 §13 で確かめた）ため、Claude の最初の応答で伝えてもらう
+# 通知は systemMessage で画面に出す（設計書 §8.4）。Claude には渡さない（応答に混ぜず、コンテキストも使わない）。
+# 通知はマシンで 1 つのキューなので、最初に起動・再開したセッションがまとめて受け取る
 kit_hook_session_start() {
   local text rec
   text="$(kit_take_notices | jq -r 'map("・" + .message) | join("\n")')"
@@ -25,7 +26,7 @@ kit_hook_session_start() {
     fi
   fi
   if [ -n "$text" ]; then
-    jq -nc --arg t "$text" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: ("kit からの通知です。最初の応答の冒頭で、次の内容をユーザーに一度だけ簡潔に伝えてください:\n" + $t)}}'
+    jq -nc --arg t "$text" '{systemMessage: ("kit:\n" + $t)}'
   fi
   # 同期に続けて、発見の分析の時期かを判定する（設計書 §7.1、§8.2）
   kit_detach /bin/bash -c '"$0" sync; "$0" discover maybe-run' "${KIT_ROOT}/bin/kit"
