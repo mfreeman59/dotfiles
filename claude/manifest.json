@@ -5,6 +5,11 @@
         "at": "2026-10-23",
         "id": "ci-optimizer-faster-github-actions-and-gitlab-ci@anthropic-plugin-directory",
         "reason": ""
+      },
+      {
+        "at": "2026-10-23",
+        "id": "supabase/agent-skills@supabase-postgres-best-practices",
+        "reason": "導入済みの supabase プラグインに同じスキルが同梱されている"
       }
     ],
     "watch": []
