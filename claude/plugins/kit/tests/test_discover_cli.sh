@@ -58,6 +58,32 @@ s_broken_manifest() {
   assert_eq "$rc" "1" "ウォッチリストも編集しない"
   assert_eq "$(cat "$(W)")" "{broken" "壊れた manifest をそのまま残す"
 }
+s_dismiss_during_sync() {
+  t_remote; t_clone A; t_clone B
+  on B fake_set '.marketplaces = [{"name":"m","source":"github","repo":"o/m"}] | .plugins = [{"id":"p@m","enabled":true}]'
+  on B kit sync >/dev/null 2>&1
+  on A kit sync >/dev/null 2>&1
+  on B fake_set '.plugins += [{"id":"q@m","enabled":true}]'
+  on B kit sync --force >/dev/null 2>&1
+  t_machine A
+  mkdir -p "$(state_file A discover)"
+  printf '%s\n' "$RECS" >"$(state_file A discover/recommendations.json)"
+  (export FAKE_SLOW=1; kit sync --force >/dev/null 2>&1) &
+  bg=$!
+  # 切り離した同期が manifest を読んだ後（他のマシンのプラグインを入れている途中）に却下する
+  i=0
+  while [ "$i" -lt 200 ] && ! grep -q 'plugin install q@m' "${FAKE_DIR}/calls.log" 2>/dev/null; do sleep 0.1; i=$((i + 1)); done
+  kit discover dismiss 1 >/dev/null 2>&1; rc=$?
+  wait "$bg"
+  assert_eq "$rc" "0" "同期の実行中でも却下できる"
+  assert_eq "$(jq -c '[.discovery.dismissed[]?.id]' "$(W)")" '["db@official"]' "同期の後も却下が作業ツリーに残る"
+  assert_eq "$(remote_manifest | jq -c '[.discovery.dismissed[]?.id]')" '["db@official"]' "却下を他のマシンに広げる"
+  mkdir "$(state_file A lock)"
+  (export KIT_EDIT_LOCK_WAIT_SECONDS=1; kit discover dismiss 2 >/dev/null 2>&1); rc=$?
+  rmdir "$(state_file A lock)"
+  assert_eq "$rc" "1" "同期が終わらなければ却下しない"
+  assert_eq "$(jq -c '[.discovery.dismissed[]?.id]' "$(W)")" '["db@official"]' "ロックを取れないまま manifest を書かない"
+}
 s_watch() {
   setup
   out="$(kit watch add o/new)"; rc=$?
@@ -151,6 +177,7 @@ s_status() {
 t_scenario "一覧" s_list
 t_scenario "却下" s_dismiss
 t_scenario "manifest が壊れていたら却下しない" s_broken_manifest
+t_scenario "同期の実行中に却下しても失わない" s_dismiss_during_sync
 t_scenario "ウォッチリスト" s_watch
 t_scenario "プラグインを入れる" s_adopt_plugin
 t_scenario "未登録のマーケットプレイスのプラグインを入れる" s_adopt_unregistered

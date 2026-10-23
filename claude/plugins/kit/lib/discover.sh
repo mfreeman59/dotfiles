@@ -5,6 +5,7 @@ KIT_DISCOVER_INTERVAL_SECONDS="${KIT_DISCOVER_INTERVAL_SECONDS:-604800}"
 KIT_DISCOVER_MIN_PROMPTS="${KIT_DISCOVER_MIN_PROMPTS:-20}"
 KIT_DISCOVER_RETRY_SECONDS="${KIT_DISCOVER_RETRY_SECONDS:-86400}"
 KIT_DISCOVER_LOCK_STALE_SECONDS="${KIT_DISCOVER_LOCK_STALE_SECONDS:-3600}"
+KIT_EDIT_LOCK_WAIT_SECONDS="${KIT_EDIT_LOCK_WAIT_SECONDS:-30}"
 
 kit_discover_usage() {
   cat <<'EOF'
@@ -156,12 +157,31 @@ kit_discover_forget() {
 
 # kit_manifest_edit <arg-json> <jq-filter>: 作業ツリーの manifest（W）を、$x に arg-json を束縛したフィルタで書き換える。
 # W が読めない・壊れているなら何も書かずに 1（壊れたファイルを空の manifest で上書きすると、全マシンの discovery が消える）
+# 切り離した同期（SessionStart / SessionEnd）が W を読んでから書き戻すまでの間に書き換えると、編集が上書きされて消えるので、
+# 同期と同じロックを取ってから読み書きする
 kit_manifest_edit() {
-  local w out
+  local i=0 rc
   if [ -z "$KIT_DOTFILES" ] || [ ! -e "${KIT_DOTFILES}/.git" ]; then
     echo "kit: dotfiles リポジトリが見つかりません" >&2
     return 1
   fi
+  kit_init_state
+  while ! kit_lock; do
+    i=$((i + 1))
+    if [ "$i" -ge $((KIT_EDIT_LOCK_WAIT_SECONDS * 5)) ]; then
+      echo "kit: 同期が終わらないため、manifest を編集できませんでした。しばらくしてからやり直してください" >&2
+      return 1
+    fi
+    sleep 0.2
+  done
+  kit_manifest_edit_locked "$1" "$2"
+  rc=$?
+  kit_unlock
+  return "$rc"
+}
+
+kit_manifest_edit_locked() {
+  local w out
   if ! w="$(kit_working_manifest 2>/dev/null)" || ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$w"; then
     echo "kit: claude/manifest.json を読めません（衝突マーカーなどを直してください）" >&2
     return 1
