@@ -1,6 +1,12 @@
 {
   "discovery": {
-    "dismissed": [],
+    "dismissed": [
+      {
+        "at": "2026-10-23",
+        "id": "ci-optimizer-faster-github-actions-and-gitlab-ci@anthropic-plugin-directory",
+        "reason": ""
+      }
+    ],
     "watch": []
   },
   "marketplaces": {
