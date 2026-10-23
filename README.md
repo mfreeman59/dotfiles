@@ -39,13 +39,12 @@ zsh と bash で読み込み経路が異なる。
 
 `_git` と `.git-completion.bash` は `dotfilesLink.sh` の対象外で、絶対パス参照のまま使う設計（シンボリックリンクしない）。
 
-## claude/ — skillsh-router
+## claude/ — claude-kit
 
-`claude/` 配下は独立したサブシステムで、Claude Code の find-skills に学習型ルーティング層を追加する **skillsh-router** を含む。セットアップ・仕組みの詳細は [claude/README.md](claude/README.md) を参照。
+`claude/` 配下は、Claude Code のスキル・プラグインを複数マシンで同期する **claude-kit**（dotfiles をローカルマーケットプレイスにした自作プラグイン `kit`）を含む。詳細は [claude/README.md](claude/README.md) を参照。
 
 ```bash
-cd ~/dotfiles/claude
-./install.sh
+~/dotfiles/claude/bootstrap.sh
 ```
 
-`dotfilesLink.sh` とは別系統のインストーラーで、`~/.claude/settings.json` へのフック登録（SessionStart / UserPromptSubmit / PostToolUse）と `~/.claude/skills/skillsh-router` へのシンボリックリンクを行う。
+`dotfilesLink.sh` とは別系統のセットアップで、マーケットプレイス `dotfiles` の登録、`kit` プラグインの導入、初回の同期を行う。

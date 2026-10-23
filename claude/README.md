@@ -1,61 +1,73 @@
-# skillsh-router
+# claude-kit
 
-A learned routing layer on top of [find-skills](https://www.skills.sh/vercel-labs/skills/find-skills) (skills.sh's own skill-discovery meta-skill).
+Claude Code のスキル・プラグインを、複数のマシンで同じ構成に保つ仕組み。dotfiles の `claude/` をローカルマーケットプレイス `dotfiles` にして、自作プラグイン `kit` として配布している。設計書: [docs/superpowers/specs/2026-10-22-claude-kit-design.md](../docs/superpowers/specs/2026-10-22-claude-kit-design.md)
 
-find-skills already knows how to search skills.sh and install what it finds via `npx skills`. What it doesn't do is remember: every capability gap runs the same search → filter → install round trip, even for something you've already resolved several times before.
+> 発見（週 1 回の振り返りと `/discover`）は計画 2 で追加する。
 
-skillsh-router adds a small, fully deterministic memory around it:
-
-- Every global `npx skills add <pkg> -g` you (or find-skills, acting on your behalf) run is recorded against the package it installed.
-- Once the **same package** has been installed **3 times**, it's promoted from a candidate to a *route* — a set of keywords mapped to that already-installed skill.
-- From then on, a new prompt whose keywords clearly match a route gets a direct suggestion to use that skill, bypassing find-skills' search entirely. If find-skills does still get invoked (e.g. on a machine where the skill isn't installed yet), it already knows the exact package to install — no search needed.
-
-Everything that needs to be deterministic (matching, counting, promotion) lives in three Claude Code hooks, not in model judgment. The only place judgment is involved is deciding whether an injected suggestion actually fits — see `skills/skillsh-router/SKILL.md`.
-
-## Layout
-
-```
-claude/
-  install.sh / uninstall.sh   # setup / teardown
-  hooks/                       # SessionStart, UserPromptSubmit, PostToolUse
-  lib/routes.sh                 # shared routes.json read/write/promote logic
-  skills/skillsh-router/         # the router skill Claude reads
-  bin/note-route                # optional: seed a candidate's keywords by hand
-  data/routes.json               # the learned routes (committed)
-  data/.pending-find.json        # find<->add correlation scratch file (gitignored)
-```
-
-## Install
+## セットアップ
 
 ```bash
-cd ~/dotfiles/claude
-./install.sh
+git clone git@github.com:mfreeman59/dotfiles.git ~/dotfiles
+~/dotfiles/claude/bootstrap.sh
 ```
 
-This is idempotent — re-run it any time after `git pull` on a machine where you've already installed it once. It:
+必要なコマンド: git、jq、gh、node（npx）、claude、perl（macOS 標準）。`bootstrap.sh` は何度実行してもよい。
 
-1. Backs up `~/.claude/settings.json`, then merges in the three hook entries (never symlinks the file itself — it holds real live state this repo doesn't otherwise manage).
-2. Symlinks `~/.claude/skills/skillsh-router` -> `claude/skills/skillsh-router`.
-3. Installs `find-skills` globally via `npx skills add vercel-labs/skills --skill find-skills -g -y`.
+## 普段の動き
 
-Start a new Claude Code session afterward to pick up the SessionStart hook.
+- Claude Code のセッション開始時と終了時に、`kit sync` がバックグラウンドで動く。
+- このマシンで入れた・外した・有効化／無効化したプラグイン、登録したマーケットプレイス、`npx skills add -g` で入れたスキルは、`claude/manifest.json` に記録され、自動でコミット・push される。
+- 他のマシンの変更は、次のセッション開始時に自動で反映される（効くのはその次のセッションから。プラグインは `/reload-plugins` でも反映できる）。
+- 問題があると、次のセッション開始時に「kit: …」という通知が出る。
 
-## Bringing this to a new machine
+同期するのはユーザースコープのものだけ。プロジェクトスコープのプラグイン、claude.ai から同期されるスキル・プラグイン、ローカルパスのマーケットプレイスは対象外。
 
-Clone dotfiles to `~/dotfiles` as usual, then run `claude/install.sh`. Because `data/routes.json` is committed, whatever you've already learned on other machines comes with it — a route with no matching package installed locally just means find-skills' next install call already knows the exact package, skipping straight past the search step.
+## 自動で git 操作をしない場合
 
-## Uninstall
+次のときは manifest の書き出しまでで止めて通知する。
+
+- dotfiles が master 以外のブランチにある、または rebase などの途中
+- master に kit 以外の push していないコミットがある（コミットまではする）
+- 未コミットの変更と、取り込む変更がぶつかる
+- master と origin/master の履歴が、kit 以外のコミットで分岐している
+- オフライン（fetch / push できない状態が 24 時間続くと通知する）
+
+## 削除を広げないための歯止め
+
+1 台で起きたことが全マシンでの削除に広がらないよう、次のときは同期を止めて通知する。
+
+- 1 回の同期で 3 件以上の削除（このマシンでの削除と、他のマシンでの削除の反映の合計）を検出した。意図した削除なら `kit sync --allow-removals` で確定する
+- `claude/manifest.json` が JSON として壊れている（衝突マーカーなど）
+- origin/master の manifest が壊れている、または以前は同期できていたのに見つからない
+
+また、次の操作は自動では行わない。
+
+- マーケットプレイスのソースが他のマシンで変わったときの入れ直し（通知だけする）
+- そのマーケットプレイスのプラグインがまだ入っているあいだの、マーケットプレイスの削除（保留する）
+
+プラグインをアンインストールするときは、プラグインのデータを残す（`--keep-data`）。
+
+## コマンド
+
+| コマンド | 内容 |
+|---|---|
+| `kit status` | 最後の同期、失敗が続いている項目、次の同期の計画を表示する |
+| `kit sync` | 今すぐ同期する。`--dry-run` で計画だけ表示、`--force` で間引きを無視 |
+| `kit sync --allow-removals` | 歯止めで止めた削除をまとめて確定する |
+| `kit sync --retry plugins/<id>` | 3 回続けて失敗して止まった項目の再試行を再開する |
+
+Claude Code の中では `kit` を名前で呼べる。ターミナルからは `~/dotfiles/claude/plugins/kit/bin/kit`。
+
+## ファイル
+
+| パス | 内容 |
+|---|---|
+| `claude/manifest.json` | 同期の正本。`discovery` 以外は kit が生成するので手で編集しない |
+| `claude/plugins/kit/` | kit プラグイン本体 |
+| `~/.local/state/claude-kit/` | マシンごとの状態（`sync.log`、`base.json`、`sync.json`、通知） |
+
+## テスト
 
 ```bash
-cd ~/dotfiles/claude
-./uninstall.sh
+~/dotfiles/claude/plugins/kit/tests/run.sh
 ```
-
-Removes the three hook entries and the skill symlink. Leaves `find-skills` and `data/routes.json` in place — delete `claude/data/` by hand if you actually want to forget what's been learned.
-
-## Tuning
-
-- `SKILLSH_ROUTER_THRESHOLD` (env var, default `3`): how many `skills add` hits before a candidate promotes to a route.
-- `SKILLSH_ROUTER_PENDING_WINDOW` (env var, default `1800` seconds): how long a `skills find` query stays eligible to be correlated with a later `skills add`.
-
-Both only need to be set in the environment the hooks run in (e.g. exported from your shell profile) — they aren't baked into `install.sh`.
