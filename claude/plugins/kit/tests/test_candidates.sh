@@ -38,6 +38,13 @@ assert_eq "$(jq '[.[] | select(.need == "t0")] | length' <<<"$out")" "12" "テ�
 assert_eq "$(jq length <<<"$out")" "60" "全体で 60 件まで"
 assert_eq "$(jq -r '[.[] | select(.need == "t0")][0].id' <<<"$out")" "p114@m" "キーワードの一致数が同じならインストール数の多い順"
 assert_eq "$(jq -nc '{needs: [], catalog: [], watch_plugins: [], skills: {}, github: {}, installed: {}, dismissed: [], watch: []}' | jqc kit_collect)" "[]" "ニーズがなければ空"
+out="$(jq -nc --argjson c "$many" '{needs: [{theme: "T", keywords: ["k0"]}], catalog: $c, watch_plugins: [],
+  skills: {T: [range(0; 5) | {kind: "skill", id: "o/r@s\(.)", name: "s", description: "", source: "o/r", skill: "s\(.)", origin: "skills.sh", signals: {}}]},
+  github: {T: [range(0; 5) | {kind: "watch", id: "g/r\(.)", name: "g/r\(.)", description: "", source: "g/r\(.)", origin: "github", signals: {}}]},
+  installed: {}, dismissed: [], watch: []}' | jqc kit_collect)"
+assert_json_eq "$(jq -c 'map(.origin) | group_by(.) | map({key: .[0], value: length}) | from_entries' <<<"$out")" '{"catalog":4,"github":4,"skills.sh":4}' \
+  "1 つのソースがテーマの枠を埋めないよう、ソースから順に 1 件ずつ取る"
+assert_eq "$(jq -c '[.[0:4][].origin]' <<<"$out")" '["catalog","skills.sh","github","catalog"]' "ソースの中の順は保つ"
 
 cands='[{"kind":"plugin","id":"a@m","name":"a","source":"./a","marketplace":"m","need":"T","signals":{"installs":3}},{"kind":"skill","id":"o/r@s","name":"s","source":"o/r","skill":"s","need":"T","signals":{}}]'
 recs="$(jqc "kit_recommendations(${cands})" <<<'{"recommendations":[

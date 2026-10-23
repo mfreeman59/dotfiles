@@ -39,18 +39,22 @@ def kit_exclude($installed; $dismissed; $watch):
            elif .kind == "watch" then (.id | IN($iw[]) | not)
            else false end)));
 
+# 配列の配列から、先頭から 1 件ずつ順に取って 1 つの配列にする（[[a1, a2], [b1]] → [a1, b1, a2]）
+def kit_interleave: (map(length) | max // 0) as $n | [range(0; $n) as $i | .[] | .[$i] // empty];
+
 # 入力 {needs, catalog, watch_plugins, skills: {<theme>: [...]}, github: {<theme>: [...]}, installed, dismissed, watch}。
-# テーマごとに、カタログ 10 件・ウォッチリスト 10 件・skills.sh 5 件・GitHub 5 件を集めて除外し、12 件まで。全体で 60 件まで
+# テーマごとに、カタログ 10 件・ウォッチリスト 10 件・skills.sh 5 件・GitHub 5 件を集めて除外し、ソースから順に 1 件ずつ取って
+# 12 件まで（1 つのソースが枠を埋めて他のソースを押し出さないように）。全体で 60 件まで
 def kit_collect:
   . as $in
   | ($in.catalog | kit_catalog_candidates) as $catalog
   | [ $in.needs[] as $n
-      | ( ($catalog | kit_match($n.keywords; 10))
-          + (($in.watch_plugins // []) | kit_match($n.keywords; 10))
-          + ((($in.skills // {})[$n.theme] // []) | .[0:5])
-          + ((($in.github // {})[$n.theme] // []) | .[0:5]) )
-      | map(. + {need: $n.theme})
-      | kit_exclude($in.installed; $in.dismissed; $in.watch)
+      | [ ($catalog | kit_match($n.keywords; 10)),
+          (($in.watch_plugins // []) | kit_match($n.keywords; 10)),
+          ((($in.skills // {})[$n.theme] // []) | .[0:5]),
+          ((($in.github // {})[$n.theme] // []) | .[0:5]) ]
+      | map(map(. + {need: $n.theme}) | kit_exclude($in.installed; $in.dismissed; $in.watch))
+      | kit_interleave
       | kit_dedupe
       | .[0:12] ]
   | (add // [])
