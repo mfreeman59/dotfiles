@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# テスト用の偽 curl（skills.sh の検索 API だけ）。q の値ごとに $FAKE_DIR/skills/<q>.json を返す。なければ失敗する
+set -uo pipefail
+echo "curl $*" >>"${FAKE_DIR}/calls.log"
+q="" prev=""
+for a in "$@"; do
+  if [ "$prev" = --data-urlencode ]; then
+    case "$a" in q=*) q="${a#q=}" ;; esac
+  fi
+  prev="$a"
+done
+f="${FAKE_DIR}/skills/${q}.json"
+[ -f "$f" ] || exit 22
+cat "$f"

@@ -94,3 +94,12 @@ wait_log() {
   done
   return 1
 }
+
+# kit_libs: bin/kit と同じように common.sh と lib/*.sh を読み込む（t_machine の後で呼ぶ）
+kit_libs() {
+  . "${KIT_PLUGIN_DIR}/lib/common.sh"
+  local f
+  for f in "${KIT_PLUGIN_DIR}"/lib/*.sh; do
+    case "$f" in */common.sh) ;; *) . "$f" ;; esac
+  done
+}

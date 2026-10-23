@@ -34,6 +34,8 @@ fi
 [ "${1:-}" = plugin ] || exit 2
 shift
 case "${1:-} ${2:-}" in
+  "list --available")
+    if [ -f "${FAKE_DIR}/available.json" ]; then cat "${FAKE_DIR}/available.json"; else echo '{"installed":[],"available":[]}'; fi ;;
   "list --json")
     # 本物の CLI と同じく、作業ディレクトリのプロジェクト設定（enabledPlugins）が enabled を上書きする
     proj='{}'

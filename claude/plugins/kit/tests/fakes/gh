@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# テスト用の偽 gh（api だけ）。エンドポイントの / を _ に置き換えた $FAKE_DIR/gh/<名前>.json を返す
+# （search/code → search_code.json）。ファイルがないか FAKE_GH_FAIL=1 なら失敗する
+set -uo pipefail
+echo "gh $*" >>"${FAKE_DIR}/calls.log"
+[ "${FAKE_GH_FAIL:-}" = 1 ] && { echo "fake gh failure" >&2; exit 1; }
+[ "${1:-}" = api ] || exit 1
+shift
+ep=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X | -f | -F | -H) shift ;;
+    *) [ -z "$ep" ] && ep="$1" ;;
+  esac
+  shift
+done
+f="${FAKE_DIR}/gh/$(printf '%s' "$ep" | tr '/' '_').json"
+[ -f "$f" ] || { echo '{"message":"Not Found"}'; exit 1; }
+cat "$f"
