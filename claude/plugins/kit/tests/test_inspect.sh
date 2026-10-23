@@ -79,4 +79,30 @@ kit_discover_inspect 99 >/dev/null 2>&1; rc=$?
 assert_eq "$rc" "1" "見つからない候補は 1"
 kit_discover_inspect >/dev/null 2>&1; rc=$?
 assert_eq "$rc" "2" "引数がなければ使い方の誤り"
+
+# シンボリックリンクで取得先の外のファイル（秘密鍵など）を読ませない
+echo "SECRET-MATERIAL" >"${HOME}/secret"
+mkdir -p "${T_TMP}/gh/evil/skills.git/skills/foo/hooks" "${T_TMP}/outside/hooks" "${T_TMP}/mk2/plugins/local/hooks"
+printf -- '---\nname: foo\n---\n' >"${T_TMP}/gh/evil/skills.git/skills/foo/SKILL.md"
+ln -s "${HOME}/secret" "${T_TMP}/gh/evil/skills.git/skills/foo/hooks/hooks.json"
+mkrepo "${T_TMP}/gh/evil/skills.git"
+echo '[{"kind":"skill","id":"evil/skills@foo","name":"foo","source":"evil/skills","skill":"foo"},
+  {"kind":"plugin","id":"linked@mk2","name":"linked","marketplace":"mk2","source":"./plugins/linked"}]' >"${KIT_STATE_DIR}/discover/search.json"
+out="$(kit_discover_inspect evil/skills@foo 2>&1)"
+assert_not_contains "$out" "SECRET-MATERIAL" "取得したもののシンボリックリンクをたどらない"
+assert_eq "$([ -L "${KIT_STATE_DIR}/inspect/evil_skills@foo/repo/skills/foo/hooks/hooks.json" ] && echo link || echo file)" "file" \
+  "シンボリックリンクを作らずに取得する"
+cp "${HOME}/secret" "${T_TMP}/outside/hooks/hooks.json"
+ln -s "${T_TMP}/outside" "${T_TMP}/mk2/plugins/linked"
+out="$(kit_discover_inspect linked@mk2 2>&1)"; rc=$?
+assert_eq "$rc" "1" "登録済みのマーケットプレイスの外を指すプラグインは断る"
+assert_not_contains "$out" "SECRET-MATERIAL" "マーケットプレイスの外のファイルを見せない"
+ln -s "${HOME}/secret" "${T_TMP}/mk2/plugins/local/hooks/hooks.json"
+out="$(kit_discover_inspect 4 2>&1)"
+assert_not_contains "$out" "SECRET-MATERIAL" "登録済みのマーケットプレイスの中のシンボリックリンクもたどらない"
+assert_contains "$out" "hooks/hooks.json: シンボリックリンク" "シンボリックリンクであることを示す"
+
+out="$(export KIT_GITHUB_URL=https://github.com; kit_inspect_clone "file://${src}" "${T_TMP}/m2" 2>&1)"; rc=$?
+assert_eq "$rc" "1" "本番では file の取得元を断る（手元のリポジトリの中身を見せない）"
+assert_eq "$([ -e "${T_TMP}/m2" ] && echo yes || echo no)" "no" "file の取得元から取得しない"
 t_done
