@@ -66,7 +66,7 @@ git clone git@github.com:mfreeman59/dotfiles.git ~/dotfiles
 | `kit sync --allow-removals` | 歯止めで止めた削除をまとめて確定する |
 | `kit sync --retry plugins/<id>` | 3 回続けて失敗して止まった項目の再試行を再開する |
 | `kit discover list` | 未処理のおすすめを表示する |
-| `kit discover run` | 今すぐ分析する（`claude -p` を使う） |
+| `kit discover run` | 今すぐ分析する（`claude -p` を使う。前回の分析の後のプロンプトが 20 件未満なら何もしない） |
 | `kit discover search <語句...>` | キーワードで候補を探す |
 | `kit discover inspect\|adopt\|dismiss <N か id>` | 候補の中身の確認・導入・却下（普段は `/kit:discover` から使う） |
 | `kit watch add\|remove <owner/repo>` | 発見のウォッチリストを編集する |

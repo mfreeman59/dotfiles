@@ -42,8 +42,14 @@ s_run() {
   assert_contains "$(cat "$(state_file A sync.log)")" "discover: done (needs=1 candidates=2 recommendations=1)" "結果をログに残す"
   last="$(cat "$(D last-run)")"
   assert_ne "$last" "" "last-run を記録する"
-  kit discover run
+  echo '{"needs":[]}' >"${FAKE_DIR}/p-needs.json"
+  kit discover run; rc=$?
+  assert_eq "$rc" "0" "続けて実行しても成功"
   assert_eq "$(jq -r .since "$(D digest.json)")" "$last" "次の分析は前回の分析より後の記録だけを使う"
+  assert_eq "$(grep -c 'required":\["needs"' "${FAKE_DIR}/calls.log")" "1" "前回の後のプロンプトが少なければ claude -p を呼ばない"
+  assert_eq "$(jq -c '[.[].id]' "$(D recommendations.json)")" '["db@official"]' "おすすめを空で置き換えない"
+  assert_eq "$(cat "$(D last-run)")" "$last" "last-run も進めない"
+  assert_contains "$(cat "$(state_file A sync.log)")" "discover: skip (0 prompts since ${last})" "分析しなかったことをログに残す"
 }
 s_no_candidates() {
   setup; prompts 3 2026-10-10

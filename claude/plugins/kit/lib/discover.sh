@@ -88,11 +88,18 @@ kit_discover_run() {
 
 # kit_discover_analyze: ① 抽出 → ② ニーズ抽出 → ③ 候補収集 → ④ 順位付け → ⑤ 保存。途中の結果も discover/ に残す
 kit_discover_analyze() {
-  local since until digest installed needs cands recs
+  local since until digest n installed needs cands recs
   since="$(cat "${KIT_DISCOVER_DIR}/last-run" 2>/dev/null)"
   until="$(kit_iso_now)"
   digest="$(kit_digest "$since")" && [ -n "$digest" ] || return 1
   kit_write_json "${KIT_DISCOVER_DIR}/digest.json" "$digest" || return 1
+  # 前回の分析があり、その後の自分のプロンプトが少なければ分析しない。ほぼ空の期間を分析して、おすすめを空で置き換えないため
+  # （手動の kit discover run や、前の分析の終わりと同時に起動した分析もここで止まる）
+  n="$(jq '.prompts | length' <<<"$digest")"
+  if [ -n "$since" ] && [ "${n:-0}" -lt "$KIT_DISCOVER_MIN_PROMPTS" ]; then
+    kit_log "discover: skip (${n:-0} prompts since ${since})"
+    return 0
+  fi
   installed="$(kit_installed)"
   needs="$(kit_llm needs "$(jq -nc --argjson d "$digest" --argjson i "$installed" '{digest: $d, installed: $i}')")" || return 1
   needs="$(jq -c '[.needs[]? | select((.theme | type) == "string" and (.keywords | type) == "array" and (.keywords | length) > 0)

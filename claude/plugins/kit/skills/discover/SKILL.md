@@ -44,4 +44,4 @@ argument-hint: "[探したいこと（省略するとおすすめの一覧）]"
 ## 補足
 
 - `kit discover adopt` / `dismiss` と `kit watch` は、処理の後に自動で `kit sync` を実行し、他のマシンにも反映する。
-- 分析を今すぐやり直すときは `kit discover run`（`claude -p` を 2 回使う）。
+- `kit discover run` で今すぐ分析できる（`claude -p` を 2 回使い、数分かかることがある）。ただし前回の分析の後のプロンプトが 20 件未満なら分析せず、おすすめはそのまま残る。
