@@ -16,6 +16,7 @@ usage: kit <command>
   sync [--dry-run] [--force] [--retry <section/key>] [--allow-removals]
                                                        manifest とこのマシンを同期する
   status                                               同期の状態と次の同期の計画を表示する
+  discover <command>                                   スキル・プラグインの発見（kit discover help）
   hook session-start|session-end                       Claude Code のフック用
 EOF
 }
@@ -23,6 +24,7 @@ EOF
 case "${1:-}" in
   sync) shift; kit_sync "$@" ;;
   status) kit_status ;;
+  discover) shift; kit_discover "$@" ;;
   hook) shift; kit_hook "$@"; exit 0 ;;
   -h | --help | help) kit_usage ;;
   *) kit_usage >&2; exit 2 ;;
