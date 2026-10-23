@@ -42,7 +42,7 @@ case "${1:-} ${2:-}" in
     [ -f "${PWD}/.claude/settings.json" ] && proj="$(jq -c '.enabledPlugins // {}' "${PWD}/.claude/settings.json")"
     jq -c --argjson proj "$proj" '[.plugins[] | .id as $id | {id, scope: (.scope // "user"), enabled: (if ($proj | has($id)) then $proj[$id] else .enabled end), version: "1.0.0"}]' "$state" ;;
   "marketplace list")
-    jq -c '[.marketplaces[] | . + {installLocation: "/tmp/fake"}]' "$state" ;;
+    jq -c '[.marketplaces[] | {installLocation: "/tmp/fake"} + .]' "$state" ;;
   "marketplace add")
     src="$3"
     in_list fail "$src" && { echo "fake: add failed" >&2; exit 1; }

@@ -31,6 +31,7 @@ kit_discover() {
     list) kit_discover_list "$@" ;;
     adopt) kit_discover_adopt "$@" ;;
     dismiss) kit_discover_dismiss "$@" ;;
+    inspect) kit_discover_inspect "$@" ;;
     -h | --help | help) kit_discover_usage ;;
     *) kit_discover_usage >&2; return 2 ;;
   esac
