@@ -31,7 +31,7 @@ skillsh-router（v1）は、`npx skills add -g` で同じパッケージが 3 �
 
 - **S1**: 新しいマシンで dotfiles を clone し、`claude/bootstrap.sh` を 1 回実行すれば同じ構成になる。
 - **S2**: あるマシンで入れた・外した・有効化／無効化したものが、手作業なしで他のマシンの次のセッションに反映される。
-- **S3**: 週 1 回の分析で関連する候補があれば提案が表示され、`/discover` から確認・導入・却下まで完結する。
+- **S3**: 週 1 回の分析で関連する候補があれば提案が表示され、`/kit:discover` から確認・導入・却下まで完結する。
 - **S4**: 却下した候補は、全マシンで二度と提案されない。
 
 ## 3. スコープ
@@ -64,9 +64,9 @@ claude/
 └─ plugins/kit/
    ├─ .claude-plugin/plugin.json
    ├─ hooks/hooks.json               SessionStart、SessionEnd（どちらも bin/kit hook を呼ぶ）
-   ├─ skills/discover/SKILL.md       /discover
+   ├─ skills/discover/SKILL.md       /kit:discover
    ├─ bin/kit                        CLI 本体（§9）
-   ├─ lib/                           common.sh / detach.sh / local_state.sh / merge.jq / merge.sh / apply.sh / git.sh / sync.sh / status.sh / hook.sh（発見の catalog.sh / digest.sh などは計画 2 で追加）
+   ├─ lib/                           common.sh / detach.sh / local_state.sh / merge.jq / merge.sh / apply.sh / git.sh / sync.sh / status.sh / hook.sh / digest.jq / digest.sh / llm.sh / catalog.sh / candidates.jq / candidates.sh / discover.sh / inspect.sh、prompts/、schemas/
    └─ tests/run.sh
 ```
 
@@ -76,7 +76,7 @@ claude/
 | `bin/kit sync` | 実状態・前回同期時点・manifest を 3 者比較し、双方向に反映して git にコミット・プッシュする（§7） |
 | `bin/kit discover` | 利用履歴の分析、候補の収集・順位付け、導入・却下（§8） |
 | `hooks/hooks.json` | sync と discover を決まったタイミングで起動し、通知を表示する |
-| `skills/discover` | `/discover` の操作手順を Claude に教えるスキル |
+| `skills/discover` | `/kit:discover` の操作手順を Claude に教えるスキル |
 | `bootstrap.sh` | マーケットプレイス登録、kit の導入、初回同期 |
 
 前提とする Claude Code の仕様（公式ドキュメント code.claude.com/docs/en/plugins/ の install / loading / cli-reference / components より）:
@@ -145,7 +145,7 @@ claude/
 | `lock/` | 排他用ディレクトリ（`mkdir` の成否でロックする） |
 | `sync.log` | 実行ログ（直近 1,000 行まで残す） |
 | `catalog.json` | `claude plugin list --available --json` のキャッシュ（24 時間有効） |
-| `discover/` | `last-run`、`digest.json`、`needs.json`、`candidates.json`、`recommendations.json`、`watch-cache/` |
+| `discover/` | `last-run`、`last-failed`、`last-notified`、`lock/`、`digest.json`、`needs.json`、`candidates.json`、`recommendations.json`、`search.json`、`watch-cache/` |
 | `inspect/<id>/` | 導入前の確認用に shallow clone した候補（読むだけで実行しない） |
 
 ## 7. 同期（`kit sync`）
@@ -156,7 +156,7 @@ claude/
 |---|---|
 | SessionStart（matcher `startup|resume`、`kit hook session-start`） | ① `notices.jsonl` と未処理のおすすめを読んで通知を出力し（§8.4）、`notices.jsonl` を空にする。② `kit sync` と、それに続く `kit discover maybe-run`（§8.2）を切り離したプロセスで起動する。① はネットワークにアクセスしないので、フックはすぐ終わる |
 | SessionEnd（`kit hook session-end`） | `kit sync` を切り離したプロセスで起動して、すぐ終わる |
-| `/discover` で導入・却下した直後 | `kit sync` |
+| `/kit:discover` で導入・却下した直後 | `kit sync` |
 | 手動 | `kit sync`、`kit sync --dry-run`、`kit status` |
 
 **切り離したプロセス**: `lib/detach.sh` が perl で fork と `setsid` を行い、標準入出力を `/dev/null` に向けてから `exec` する。子は Claude Code のプロセスグループからもセッションからも外れるので、Claude Code が終了しても動き続ける（このマシンで、親のプロセスグループごと SIGTERM を送っても子が生き残ることを確認済み）。macOS には `setsid` コマンドがないので perl を使う。
@@ -293,13 +293,13 @@ git 操作は安全側に倒して止め、必ず通知する。
 | # | ソース | 取得方法 | 品質の目安 |
 |---|---|---|---|
 | 1 | 登録済みカタログ（Anthropic プラグインディレクトリ約 3,590 件、claude-plugins-official 約 300 件、登録済みのその他） | `claude plugin list --available --json`（24 時間キャッシュ） | 公式はインストール数。ディレクトリは出どころ |
-| 2 | skills.sh | `npx --yes skills find <keywords>` | インストール数 |
+| 2 | skills.sh | `curl` で検索 API（`https://skills.sh/api/search?q=<keywords>&limit=5`）。skills CLI の `find` と同じ API だが、CLI は結果をインストール数で並べ替えて関連度の順を崩すため、直接呼ぶ | インストール数 |
 | 3 | ウォッチリスト（`discovery.watch`） | `gh api repos/<owner/repo>/contents/.claude-plugin/marketplace.json`（24 時間キャッシュ） | リポジトリのスター数、最終更新日 |
 | 4 | GitHub 全体 | `gh api search/code -f q='filename:marketplace.json path:.claude-plugin <keyword>'`（1 回の分析で最大 5 クエリ）、続けて `gh api repos/<r>` | スター 20 以上、180 日以内に push があるものだけ残す |
 
 ソース 4 で見つかったものは個別のプラグインとしては推さず、「ウォッチリストに追加しませんか」という候補（種別 `watch`）として出す。
 
-未登録のマーケットプレイスは、そこにあるプラグインを `/discover` で導入したときに初めて登録され、manifest に記録される。
+未登録のマーケットプレイスは、そこにあるプラグインを `/kit:discover` で導入したときに初めて登録され、manifest に記録される。
 
 ### 8.2 分析ジョブ
 
@@ -308,13 +308,15 @@ git 操作は安全側に倒して止め、必ず通知する。
 - `discover/last-run` から 7 日以上経っている（ファイルがなければ満たす）
 - 前回の分析以降、このマシンのトランスクリプトに自分のプロンプトが 20 件以上ある
 
+ただし、前回の分析が失敗してから 24 時間以内は起動しない（`discover/last-failed`。未ログインや予算超過のときに、セッション開始のたびに失敗とコストを繰り返さないため）。
+
 `kit discover run` の流れ:
 
 | 段階 | 担当 | 入力 → 出力 |
 |---|---|---|
 | ① 抽出 | スクリプト | `~/.claude/projects/*/*.jsonl`（`subagents/` は除く）のうち前回分析以降の記録 → `digest.json`。自分のプロンプト（`<` で始まるシステム由来のものは除き、1 件 300 字まで、最大 200 件）、Bash コマンドの先頭語の頻度上位 30、Skill / MCP ツールの利用回数、プロジェクト名ごとのセッション数。全体を 60KB 以内に切り詰める |
 | ② ニーズ抽出 | `claude -p` | `digest.json` と導入済みのプラグイン・スキルの一覧 → `needs.json`。繰り返している作業のテーマを最大 5 件。各テーマは `theme`（日本語の要約）、`evidence`（根拠となるプロンプトやコマンドの例）、`keywords`（英語の検索語 1〜4 個） |
-| ③ 候補収集 | スクリプト | `needs.json` → `candidates.json`。テーマごとに §8.1 のソースを検索し、ソース 1 は名前と説明文の部分一致で上位 10 件、ソース 2 は上位 5 件、ソース 3 はすべて、ソース 4 は条件を満たすもの。導入済みと `dismissed` を除き、全体で最大 60 件 |
+| ③ 候補収集 | スクリプト | `needs.json` → `candidates.json`。テーマごとに §8.1 のソースを検索し、ソース 1 と 3 は名前と説明文の部分一致で上位 10 件ずつ（大きなマーケットプレイスをウォッチしても他のソースを押し出さないよう、3 もキーワードで絞る）、ソース 2 は関連度の上位 5 件、ソース 4 は条件を満たすもの（上位 5 リポジトリから）。導入済み・`dismissed`・ウォッチ済みを除き、テーマごとに 12 件、全体で最大 60 件 |
 | ④ 順位付け | `claude -p` | `needs.json` と `candidates.json` → `recommendations.json`。最大 5 件。合うものがなければ 0 件でよいと指示する |
 | ⑤ 保存 | スクリプト | `recommendations.json` を保存し、`last-run` を更新する |
 
@@ -368,16 +370,16 @@ KIT_NESTED=1 claude -p \
 }
 ```
 
-SessionStart フックの `systemMessage` は画面に表示されなかった（§13。2026-10-23 に実機で確認）。そのため、通知は Claude に渡し、最初の応答で伝えてもらう。Claude は同じ文面をもとに、/discover などの話題にも応じられる。
+SessionStart フックの `systemMessage` は画面に表示されなかった（§13。2026-10-23 に実機で確認）。そのため、通知は Claude に渡し、最初の応答で伝えてもらう。Claude は同じ文面をもとに、/kit:discover などの話題にも応じられる。
 
 - `notices.jsonl` に溜まった通知はすべて表示して、空にする。同じ文面のものは 1 つにまとめる。
 - 警告（level が `warn`）は、同じ文面のものを 6 時間に 1 回までしか通知キューに入れない。master 以外のブランチで作業している間など、同期のたびに同じ警告が出続けるのを防ぐため。
-- 未処理のおすすめが 1 件以上あれば「🔎 おすすめ N 件 — /discover で確認」と表示する。並列セッションでうるさくならないよう、同じ日には 1 回だけ（`discover/last-notified` に日付を記録）。
-- おすすめは、次の分析で置き換わるまで、または `/discover` で全件を処理するまで「未処理」とする。
+- 未処理のおすすめが 1 件以上あれば「🔎 おすすめ N 件 — /kit:discover で確認」と表示する。並列セッションでうるさくならないよう、同じ日には 1 回だけ（`discover/last-notified` に日付を記録）。
+- おすすめは、次の分析で置き換わるまで、または `/kit:discover` で全件を処理するまで「未処理」とする。
 
-### 8.5 `/discover`
+### 8.5 `/kit:discover`
 
-`skills/discover/SKILL.md` が、Claude に次の手順を教える。
+`skills/discover/SKILL.md` が、Claude に次の手順を教える。kit プラグインのスキルなので、呼び出すときの名前は `/kit:discover` になる（プラグインのスキルは `/<プラグイン名>:<スキル名>`）。
 
 1. **一覧**: `kit discover list` の出力を表で見せる。番号、種別、名前、出どころ、理由、既存との重なり、信頼性の目安（インストール数・スター数・最終更新日）。
 2. **「N を入れて」と言われたとき**:
@@ -386,7 +388,7 @@ SessionStart フックの `systemMessage` は画面に表示されなかった�
    3. ユーザーの最終的な OK をもらってから `kit discover adopt <N>` を実行する（§8.6）。
 3. **「N はいらない」と言われたとき**: 理由を聞き（なければ空でよい）、`kit discover dismiss <N> --reason "<理由>"` を実行する。
 4. **ウォッチ候補を承認されたとき**: `kit discover adopt <N>`（種別 `watch` なら `kit watch add <owner/repo>` と同じ動作）。
-5. **`/discover <自由文>`**: その場で検索する。Claude が自由文から英語のキーワードを作り、`kit discover search <keywords...>`（§8.2 の③と同じ処理）で候補を得て、このセッションの中で順位付けして見せる。以降は 2〜4 と同じ。v1 の find-skills の役割を置き換える。
+5. **`/kit:discover <自由文>`**: その場で検索する。Claude が自由文から英語のキーワードを作り、`kit discover search <keywords...>`（§8.2 の③と同じ処理）で候補を得て、このセッションの中で順位付けして見せる。以降は 2〜4 と同じ。v1 の find-skills の役割を置き換える。
 
 `adopt` / `dismiss` / `watch add` は、処理の後に必ず `kit sync` を実行する。`adopt` / `dismiss` した候補は `recommendations.json` から外す（全件なくなれば「未処理のおすすめ」はなくなる）。
 
@@ -474,8 +476,8 @@ SessionStart フックの `systemMessage` は画面に表示されなかった�
 | 確かめること | 期待どおりなら | 違ったら |
 |---|---|---|
 | SessionStart フックの `systemMessage` がユーザーに表示される | — | **確認済み（2026-10-23）: 表示されなかった。** `additionalContext` に「最初の応答の冒頭で、次の通知をユーザーに一度だけ伝える」という指示を入れて、Claude に伝えてもらう（§8.4） |
-| `claude plugin install <name>@anthropic-plugin-directory` がマーケットプレイスの追加なしで動く | §8.6 のとおり | そのプラグインのソース（`git-subdir` / `url`）を `--marketplace` に渡す方式に切り替え、manifest にはそのマーケットプレイスを記録する |
-| `claude -p --safe-mode --tools "" --json-schema ...` が、claude.ai のログインのまま構造化出力を返す | §8.2 のとおり | `--safe-mode` の代わりに `--setting-sources project` と `KIT_NESTED=1` で入れ子実行を防ぐ |
+| `claude plugin install <name>@anthropic-plugin-directory` がマーケットプレイスの追加なしで動く | **確認済み（2026-10-23）: 動いた。** マーケットプレイスの一覧にも追加されない（§8.6 のとおり） | — |
+| `claude -p --safe-mode --tools "" --json-schema ...` が、claude.ai のログインのまま構造化出力を返す | **確認済み（2026-10-23）: 返した。** 構造化出力は `--output-format json` の結果の `structured_output`（§8.2 のとおり） | — |
 
 ## 14. 決定事項
 

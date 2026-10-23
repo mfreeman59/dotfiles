@@ -141,6 +141,12 @@ s_adopt_search() {
   assert_eq "$rc" "0" "直前の検索結果からも入れられる"
   assert_contains "$(fake_calls)" "claude plugin install zz@official -s user --json" "検索結果の候補を入れる"
 }
+s_status() {
+  setup
+  out="$(kit status)"
+  assert_contains "$out" "未処理のおすすめ: 4 件（/kit:discover で確認）" "おすすめの件数"
+  assert_contains "$out" "前回の発見の分析: まだありません" "前回の分析"
+}
 
 t_scenario "一覧" s_list
 t_scenario "却下" s_dismiss
@@ -154,4 +160,5 @@ t_scenario "スキルを入れる" s_adopt_skill
 t_scenario "ウォッチ候補を承認する" s_adopt_watch
 t_scenario "導入の失敗" s_adopt_fail
 t_scenario "検索結果から入れる" s_adopt_search
+t_scenario "kit status" s_status
 t_done

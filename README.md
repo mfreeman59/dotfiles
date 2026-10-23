@@ -41,7 +41,7 @@ zsh と bash で読み込み経路が異なる。
 
 ## claude/ — claude-kit
 
-`claude/` 配下は、Claude Code のスキル・プラグインを複数マシンで同期する **claude-kit**（dotfiles をローカルマーケットプレイスにした自作プラグイン `kit`）を含む。詳細は [claude/README.md](claude/README.md) を参照。
+`claude/` 配下は、Claude Code のスキル・プラグインを日々の利用から見つけ、複数マシンで同期する **claude-kit**（dotfiles をローカルマーケットプレイスにした自作プラグイン `kit`）を含む。詳細は [claude/README.md](claude/README.md) を参照。
 
 ```bash
 ~/dotfiles/claude/bootstrap.sh

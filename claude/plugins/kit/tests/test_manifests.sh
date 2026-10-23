@@ -14,4 +14,8 @@ if [ -f "${KIT_PLUGIN_DIR}/hooks/hooks.json" ]; then
   jq -e '.hooks.SessionStart and .hooks.SessionEnd' "${KIT_PLUGIN_DIR}/hooks/hooks.json" >/dev/null
   assert_eq "$?" "0" "hooks.json に SessionStart と SessionEnd がある"
 fi
+f="${KIT_PLUGIN_DIR}/skills/discover/SKILL.md"
+assert_eq "$(sed -n 2p "$f" 2>/dev/null)" "name: discover" "/kit:discover のスキルがある"
+assert_contains "$(cat "$f" 2>/dev/null)" "kit discover adopt" "導入の手順を教える"
+assert_contains "$(cat "$f" 2>/dev/null)" "kit discover inspect" "導入の前に中身を確かめさせる"
 t_done
