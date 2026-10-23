@@ -123,17 +123,17 @@ kit_with_timeout() {
   ' "$secs" "$@"
 }
 
-# kit_lock: mkdir の成否で排他する。KIT_LOCK_STALE_SECONDS より古いロックは異常終了の残骸とみなして消す
-kit_lock() {
-  local lock mtime
-  kit_init_state
-  lock="${KIT_STATE}/lock"
+# kit_mkdir_lock <dir> <stale-seconds>: mkdir の成否で排他する。stale-seconds より古いロックは異常終了の残骸とみなして消す
+kit_mkdir_lock() {
+  local lock="$1" mtime
+  mkdir -p "$(dirname "$lock")"
   if mkdir "$lock" 2>/dev/null; then return 0; fi
   mtime="$(stat -f %m "$lock" 2>/dev/null || echo 0)"
-  if [ $(($(kit_now) - mtime)) -ge "$KIT_LOCK_STALE_SECONDS" ]; then
+  if [ $(($(kit_now) - mtime)) -ge "$2" ]; then
     rmdir "$lock" 2>/dev/null
     mkdir "$lock" 2>/dev/null && return 0
   fi
   return 1
 }
+kit_lock() { kit_mkdir_lock "${KIT_STATE}/lock" "$KIT_LOCK_STALE_SECONDS"; }
 kit_unlock() { rmdir "${KIT_STATE}/lock" 2>/dev/null || true; }
